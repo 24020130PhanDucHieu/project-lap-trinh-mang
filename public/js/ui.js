@@ -16,6 +16,7 @@ class GameUI {
     this.boardElement = null;
     this.isAiThinking = false;
     this.tournamentActiveTableId = 1;
+    this.tournamentViewMode = 'quad'; // 'quad' (4 bàn đồng thời) or 'single' (1 bàn chi tiết)
   }
 
   init(mode = 'online') {
@@ -120,6 +121,11 @@ class GameUI {
         };
       }
 
+      const rematchBtn = document.getElementById('btn-rematch');
+      if (rematchBtn) {
+        rematchBtn.style.display = (this.myRole === 'spectator') ? 'none' : 'inline-flex';
+      }
+
       this.showToast(`Đã vào phòng [${data.roomCode}]. Gửi mã này cho bạn bè để cùng chơi!`);
     });
 
@@ -203,15 +209,39 @@ class GameUI {
       this.tournamentActiveTableId = data.assignedTableId || 1;
       this.updateTournamentRoleBadge(data);
       this.renderTournamentTablesNav(data.tournament.tables);
+
+      // Spectators default to Quad-View (watching all 4 tables simultaneously)
+      // Players default to Single-Table focus (playing on their assigned board)
+      if (this.myRole === 'spectator') {
+        this.tournamentViewMode = 'quad';
+      } else {
+        this.tournamentViewMode = 'single';
+      }
+
+      const toggleBtn = document.getElementById('btn-toggle-view-mode');
+      if (toggleBtn) toggleBtn.style.display = 'inline-flex';
+
+      this.applyTournamentViewMode();
+      this.renderQuadView(data.tournament.tables);
       this.displayTournamentTable(this.tournamentActiveTableId);
+      this.updateTourResetButtonState(data.tournament.tables);
+
       this.updateSpectatorsUI(data.tournament.spectatorCount);
       this.renderChatHistory(data.tournament.chatHistory || []);
-      this.showToast(`Chào mừng ${data.playerName} đến với Giải Đấu 4 Bàn!`);
+
+      if (this.myRole === 'spectator') {
+        this.showToast(`👁️ Chào mừng Khán Giả ${data.playerName}! Đang phát sóng toàn cảnh 4 bàn thi đấu.`);
+      } else {
+        this.showToast(`⚔️ Chào mừng ${data.playerName} (Tuyển thủ Bàn ${this.tournamentActiveTableId})!`);
+      }
     });
 
     window.PlayFull.on('tournament_state_updated', (data) => {
       this.renderTournamentTablesNav(data.tables);
+      this.renderQuadView(data.tables);
       this.updateSpectatorsUI(data.spectatorCount);
+      this.updateTourResetButtonState(data.tables);
+
       // Re-render currently viewed table
       const currentTable = data.tables.find(t => t.id === this.tournamentActiveTableId);
       if (currentTable) {
@@ -221,6 +251,14 @@ class GameUI {
     });
 
     window.PlayFull.on('tournament_move_performed', (data) => {
+      // Update mini-board in Quad-View in real time
+      this.updateQuadTable(data.tableId, data.gameState);
+      this.updateTableNavStatus(data.tableId, data.gameState);
+
+      if (window.PlayFull.tournamentData && window.PlayFull.tournamentData.tables) {
+        this.updateTourResetButtonState(window.PlayFull.tournamentData.tables);
+      }
+
       if (data.tableId === this.tournamentActiveTableId) {
         if (data.capturedPiece) {
           window.soundEngine.playCapture();
@@ -237,12 +275,15 @@ class GameUI {
           window.soundEngine.playVictory();
           this.showVictoryModal(data.gameState);
         }
+      } else if (data.gameState.winner) {
+        // Notification for spectators viewing other tables
+        const winnerColor = data.gameState.winner === 'red' ? 'ĐỎ' : 'XANH';
+        this.showToast(`🏆 Bàn ${data.tableId} đã có kết quả: Bên ${winnerColor} giành chiến thắng!`, 'success');
       }
-      // Update badge on nav tab
-      this.updateTableNavStatus(data.tableId, data.gameState);
     });
 
     window.PlayFull.on('tournament_table_reset', (data) => {
+      this.updateQuadTable(data.tableId, data.gameState);
       if (data.tableId === this.tournamentActiveTableId) {
         this.selectedCell = null;
         this.legalMoves = [];
@@ -252,6 +293,23 @@ class GameUI {
         this.closeVictoryModal();
         this.showToast(`Bàn ${data.tableId} đã được khởi động lại!`);
       }
+    });
+
+    window.PlayFull.on('tournament_all_reset', (data) => {
+      this.renderQuadView(data.tables);
+      this.renderTournamentTablesNav(data.tables);
+      this.updateTourResetButtonState(data.tables);
+
+      const currentTable = data.tables.find(t => t.id === this.tournamentActiveTableId);
+      if (currentTable) {
+        this.selectedCell = null;
+        this.legalMoves = [];
+        this.renderBoard(currentTable.gameState);
+        this.updateHUD(currentTable.gameState);
+      }
+      this.clearHistoryUI();
+      this.closeVictoryModal();
+      this.showToast('🔄 Toàn bộ 4 bàn thi đấu đã được reset sau khi cả 4 trận kết thúc! Vòng mới bắt đầu.', 'success');
     });
 
     window.PlayFull.on('tournament_new_chat', (data) => {
@@ -297,10 +355,7 @@ class GameUI {
       `;
 
       btn.onclick = () => {
-        this.tournamentActiveTableId = t.id;
-        document.querySelectorAll('.tour-tab-btn').forEach(b => b.classList.remove('active-tab'));
-        btn.classList.add('active-tab');
-        this.displayTournamentTable(t.id);
+        this.focusTable(t.id);
       };
 
       nav.appendChild(btn);
@@ -308,7 +363,6 @@ class GameUI {
   }
 
   updateTableNavStatus(tableId, gameState) {
-    // Re-render nav tab status
     if (window.PlayFull.tournamentData && window.PlayFull.tournamentData.tables) {
       this.renderTournamentTablesNav(window.PlayFull.tournamentData.tables);
     }
@@ -329,7 +383,10 @@ class GameUI {
     const banner = document.getElementById('turn-status-banner');
     if (banner) {
       const isRed = table.gameState.turn === 'red';
-      banner.innerHTML = `<strong>[Bàn ${table.id}]</strong> LƯỢT: ${isRed ? '🔴 QUÂN ĐỎ' : '🔵 QUÂN XANH'}`;
+      const status = table.gameState.winner
+        ? `🏆 ĐÃ KẾT THÚC (${table.gameState.winner === 'red' ? 'ĐỎ' : 'XANH'} THẮNG)`
+        : `LƯỢT: ${isRed ? '🔴 QUÂN ĐỎ' : '🔵 QUÂN XANH'}`;
+      banner.innerHTML = `<strong>[Bàn ${table.id}]</strong> ${status}`;
     }
   }
 
@@ -342,9 +399,207 @@ class GameUI {
       badge.style.color = data.assignedColor === 'red' ? 'var(--color-red)' : 'var(--color-blue)';
       badge.style.borderColor = data.assignedColor === 'red' ? 'var(--color-red)' : 'var(--color-blue)';
     } else {
-      badge.textContent = 'Khán Giả Giải Đấu (Spectator)';
+      badge.textContent = 'Khán Giả Toàn Cảnh (Spectator)';
       badge.style.color = 'var(--color-gold)';
       badge.style.borderColor = 'var(--color-gold)';
+    }
+  }
+
+  // ========================================================
+  // QUAD-VIEW (4 BÀN CÙNG 1 TRANG WEB CHO KHÁN GIẢ)
+  // ========================================================
+  toggleTournamentViewMode() {
+    this.tournamentViewMode = (this.tournamentViewMode === 'quad') ? 'single' : 'quad';
+    this.applyTournamentViewMode();
+  }
+
+  applyTournamentViewMode() {
+    const quadContainer = document.getElementById('tournament-quad-container');
+    const singleContainer = document.getElementById('single-arena-container');
+    const toggleBtn = document.getElementById('btn-toggle-view-mode');
+
+    if (!quadContainer || !singleContainer) return;
+
+    if (this.tournamentViewMode === 'quad') {
+      quadContainer.style.display = 'flex';
+      singleContainer.style.display = 'none';
+      if (toggleBtn) {
+        toggleBtn.innerHTML = '🎯 Xem Cận Cảnh Bàn';
+        toggleBtn.title = 'Phóng to 1 bàn cụ thể';
+      }
+      if (window.PlayFull.tournamentData && window.PlayFull.tournamentData.tables) {
+        this.renderQuadView(window.PlayFull.tournamentData.tables);
+      }
+    } else {
+      quadContainer.style.display = 'none';
+      singleContainer.style.display = 'grid';
+      if (toggleBtn) {
+        toggleBtn.innerHTML = '📺 Xem Toàn Cảnh 4 Bàn';
+        toggleBtn.title = 'Theo dõi đồng thời 4 bàn thi đấu trên 1 màn hình';
+      }
+      this.displayTournamentTable(this.tournamentActiveTableId);
+    }
+  }
+
+  focusTable(tableId) {
+    this.tournamentActiveTableId = tableId;
+    this.tournamentViewMode = 'single';
+    this.applyTournamentViewMode();
+    this.displayTournamentTable(tableId);
+
+    document.querySelectorAll('.tour-tab-btn').forEach((btn, idx) => {
+      if (idx + 1 === tableId) btn.classList.add('active-tab');
+      else btn.classList.remove('active-tab');
+    });
+    this.showToast(`Đã chuyển sang xem Bàn ${tableId}`);
+  }
+
+  renderQuadView(tables) {
+    const quadGrid = document.getElementById('quad-view-grid');
+    if (!quadGrid || !tables) return;
+    quadGrid.innerHTML = '';
+
+    tables.forEach(t => {
+      const card = document.createElement('div');
+      card.className = 'quad-table-card glass-panel';
+      card.id = `quad-card-table-${t.id}`;
+
+      const red = t.players.red ? t.players.red.name : 'Chờ tuyển thủ';
+      const blue = t.players.blue ? t.players.blue.name : 'Chờ tuyển thủ';
+      const isFinished = !!t.gameState.winner;
+      const isPlaying = t.players.red && t.players.blue && !isFinished;
+
+      let statusBadge = '<span style="color: var(--color-green); font-size: 11px;">● Sẵn sàng</span>';
+      if (isPlaying) {
+        statusBadge = '<span style="color: var(--color-gold); font-weight: 700; font-size: 11px;">⚔️ Đang thi đấu</span>';
+      } else if (isFinished) {
+        const winColor = t.gameState.winner === 'red' ? 'var(--color-red)' : 'var(--color-blue)';
+        const winName = t.gameState.winner === 'red' ? red : blue;
+        statusBadge = `<span style="color: ${winColor}; font-weight: 800; font-size: 11px;">🏆 ${winName} Thắng!</span>`;
+      }
+
+      const turnText = isFinished
+        ? `<span style="color: var(--color-gold); font-weight:700;">Đã xong</span>`
+        : (isPlaying
+            ? `Lượt: ${t.gameState.turn === 'red' ? '<strong style="color:var(--color-red)">ĐỎ</strong>' : '<strong style="color:var(--color-blue)">XANH</strong>'}`
+            : 'Chờ ghép cặp');
+
+      card.innerHTML = `
+        <div class="quad-table-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-weight: 800; font-size: 15px; color: var(--color-gold);">🏆 BÀN ${t.id}</span>
+            ${statusBadge}
+          </div>
+          <button class="btn btn-glass btn-sm" onclick="window.GameUI.focusTable(${t.id})" style="padding: 3px 10px; font-size: 11px;">
+            🔍 Xem Chi Tiết
+          </button>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; width: 100%; font-size: 11px; padding: 4px 8px; background: rgba(0,0,0,0.3); border-radius: 6px;">
+          <div style="color: var(--color-red); font-weight: 700;">
+            🔴 ${red} <span id="quad-red-count-${t.id}">(${t.gameState.pieceCounts ? t.gameState.pieceCounts.red.total : 9}/9)</span>
+          </div>
+          <div id="quad-turn-${t.id}" style="color: var(--text-dim); font-size: 11px;">
+            ${turnText}
+          </div>
+          <div style="color: var(--color-blue); font-weight: 700;">
+            🔵 ${blue} <span id="quad-blue-count-${t.id}">(${t.gameState.pieceCounts ? t.gameState.pieceCounts.blue.total : 9}/9)</span>
+          </div>
+        </div>
+
+        <div class="quad-board-outer">
+          <div class="quad-board-grid" id="quad-board-${t.id}"></div>
+        </div>
+      `;
+
+      quadGrid.appendChild(card);
+      this.populateQuadBoardGrid(t.id, t.gameState);
+    });
+  }
+
+  populateQuadBoardGrid(tableId, gameState) {
+    const boardEl = document.getElementById(`quad-board-${tableId}`);
+    if (!boardEl || !gameState) return;
+    boardEl.innerHTML = '';
+
+    const board = gameState.board;
+    for (let r = 8; r >= 0; r--) {
+      for (let c = 0; c < 9; c++) {
+        const cell = document.createElement('div');
+        cell.className = 'quad-cell ' + ((r + c) % 2 === 0 ? 'cell-dark' : 'cell-light');
+
+        if (c === 0 && r === 0) {
+          cell.classList.add('sanctuary-a1');
+          cell.title = 'a1 (Căn cứ mục tiêu của XANH)';
+        } else if (c === 8 && r === 8) {
+          cell.classList.add('sanctuary-i9');
+          cell.title = 'i9 (Căn cứ mục tiêu của ĐỎ)';
+        }
+
+        const piece = board[r][c];
+        if (piece) {
+          const pieceEl = document.createElement('div');
+          pieceEl.className = `quad-piece ${piece.player === 'red' ? 'red-piece' : 'blue-piece'}`;
+
+          let icon = '✊';
+          if (piece.type === window.OTT.PIECE_TYPES.PAPER) icon = '✋';
+          else if (piece.type === window.OTT.PIECE_TYPES.SCISSORS) icon = '✌️';
+
+          pieceEl.textContent = icon;
+          cell.appendChild(pieceEl);
+        }
+
+        boardEl.appendChild(cell);
+      }
+    }
+  }
+
+  updateQuadTable(tableId, gameState) {
+    this.populateQuadBoardGrid(tableId, gameState);
+
+    const redCount = document.getElementById(`quad-red-count-${tableId}`);
+    const blueCount = document.getElementById(`quad-blue-count-${tableId}`);
+    const turnEl = document.getElementById(`quad-turn-${tableId}`);
+
+    if (gameState.pieceCounts) {
+      if (redCount) redCount.textContent = `(${gameState.pieceCounts.red.total}/9)`;
+      if (blueCount) blueCount.textContent = `(${gameState.pieceCounts.blue.total}/9)`;
+    }
+
+    if (turnEl) {
+      if (gameState.winner) {
+        const winColor = gameState.winner === 'red' ? 'var(--color-red)' : 'var(--color-blue)';
+        turnEl.innerHTML = `<strong style="color:${winColor}">🏆 Đã xong</strong>`;
+      } else {
+        turnEl.innerHTML = `Lượt: ${gameState.turn === 'red' ? '<strong style="color:var(--color-red)">ĐỎ</strong>' : '<strong style="color:var(--color-blue)">XANH</strong>'}`;
+      }
+    }
+  }
+
+  updateTourResetButtonState(tables) {
+    const btn = document.getElementById('btn-tour-reset-all');
+    if (!btn) return;
+
+    if (this.mode !== 'tournament' || this.myRole === 'spectator') {
+      btn.style.display = 'none';
+      return;
+    }
+
+    btn.style.display = 'inline-flex';
+    if (!tables || tables.length === 0) return;
+
+    const finishedCount = tables.filter(t => !!t.gameState.winner).length;
+    if (finishedCount === 4) {
+      btn.innerHTML = '🔄 Reset Toàn Bộ Giải (Cả 4 bàn đã xong!)';
+      btn.disabled = false;
+      btn.style.opacity = '1';
+      btn.style.cursor = 'pointer';
+      btn.style.boxShadow = '0 0 15px rgba(255, 51, 102, 0.6)';
+    } else {
+      btn.innerHTML = `⏳ Chưa thể Reset (${finishedCount}/4 bàn xong)`;
+      btn.disabled = false;
+      btn.style.opacity = '0.75';
+      btn.style.boxShadow = 'none';
     }
   }
 
@@ -410,11 +665,44 @@ class GameUI {
       });
     });
 
+    // Toggle View Mode: Quad-View vs Single Focus
+    const toggleViewBtn = document.getElementById('btn-toggle-view-mode');
+    if (toggleViewBtn) {
+      toggleViewBtn.addEventListener('click', () => {
+        this.toggleTournamentViewMode();
+      });
+    }
+
+    // Tournament Reset All Button (For players after all 4 finished)
+    const tourResetBtn = document.getElementById('btn-tour-reset-all');
+    if (tourResetBtn) {
+      tourResetBtn.addEventListener('click', () => {
+        if (this.myRole === 'spectator') {
+          this.showToast('Khán giả không có quyền reset giải đấu! Bạn chỉ có quyền theo dõi giải.', 'warning');
+          return;
+        }
+        const tables = (window.PlayFull.tournamentData && window.PlayFull.tournamentData.tables) || [];
+        const allDone = tables.length === 4 && tables.every(t => !!t.gameState.winner);
+        if (!allDone) {
+          const finishedCount = tables.filter(t => !!t.gameState.winner).length;
+          this.showToast(`Chưa thể reset giải đấu! Hiện tại mới có ${finishedCount}/4 bàn kết thúc. Phải thi đấu xong cả 4 bàn mới được phép reset!`, 'warning');
+          return;
+        }
+        window.PlayFull.resetTournamentAll();
+      });
+    }
+
     // Rematch button
     const rematchBtn = document.getElementById('btn-rematch');
     if (rematchBtn) {
       rematchBtn.addEventListener('click', () => {
-        if (this.mode === 'online' || this.mode === 'tournament') {
+        if (this.myRole === 'spectator') {
+          this.showToast('Khán giả chỉ có quyền xem, không được quyền reset lại ván đấu!', 'warning');
+          return;
+        }
+        if (this.mode === 'tournament') {
+          window.PlayFull.resetTournamentAll();
+        } else if (this.mode === 'online') {
           window.PlayFull.resetGame();
         } else {
           this.initLocalGame();
@@ -800,6 +1088,7 @@ class GameUI {
     const modal = document.getElementById('victory-modal');
     const titleEl = document.getElementById('victory-title');
     const descEl = document.getElementById('victory-desc');
+    const rematchBtn = document.getElementById('btn-rematch');
 
     if (!modal) return;
 
@@ -808,6 +1097,15 @@ class GameUI {
       titleEl.innerHTML = `🏆 BÊN ${isRed ? '<span style="color:var(--color-red)">ĐỎ</span>' : '<span style="color:var(--color-blue)">XANH</span>'} CHIẾN THẮNG!`;
     }
     if (descEl) descEl.textContent = gameState.winDescription;
+
+    // SPECTATORS CANNOT RESET MATCHES
+    if (rematchBtn) {
+      if (this.myRole === 'spectator') {
+        rematchBtn.style.display = 'none';
+      } else {
+        rematchBtn.style.display = 'inline-flex';
+      }
+    }
 
     modal.classList.add('active');
   }

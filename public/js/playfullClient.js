@@ -121,6 +121,13 @@ class PlayFullClient {
       this.trigger('tournament_table_reset', data);
     });
 
+    this.socket.on('tournament_all_reset', (data) => {
+      if (this.tournamentData) {
+        this.tournamentData.tables = data.tables;
+      }
+      this.trigger('tournament_all_reset', data);
+    });
+
     this.socket.on('tournament_new_chat', (data) => {
       this.trigger('tournament_new_chat', data);
     });
@@ -163,15 +170,18 @@ class PlayFullClient {
   resetGame(layout = 'frontline') {
     if (!this.socket) return;
     if (this.isTournament) {
-      this.socket.emit('tournament_reset_table', {
-        tableId: this.activeTableId
-      });
+      this.socket.emit('tournament_reset_all');
     } else {
       this.socket.emit('client_reset_game', {
         roomCode: this.roomCode,
         layout
       });
     }
+  }
+
+  resetTournamentAll() {
+    if (!this.socket || !this.isTournament) return;
+    this.socket.emit('tournament_reset_all');
   }
 
   sendChat(text) {

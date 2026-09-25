@@ -829,6 +829,126 @@ body {
   margin: 0 auto;
 }
 
+/* Quad-View Tournament (4 Bàn Cùng Một Trang Web) */
+#tournament-quad-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 10px 16px;
+}
+
+.quad-view-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.quad-table-card {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--border-radius-md);
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.quad-table-card:hover {
+  border-color: var(--border-glass-bright);
+  box-shadow: 0 0 20px rgba(0, 210, 255, 0.15);
+}
+
+.quad-table-header {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-glass);
+  padding-bottom: 8px;
+  font-size: 13px;
+}
+
+.quad-board-outer {
+  background: #090e1a;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.quad-board-grid {
+  display: grid;
+  grid-template-columns: repeat(9, 32px);
+  grid-template-rows: repeat(9, 32px);
+  gap: 1.5px;
+  background: #050811;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.quad-cell {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 2px;
+  font-size: 16px;
+  user-select: none;
+}
+
+.quad-cell.cell-light {
+  background: var(--tile-light);
+}
+
+.quad-cell.cell-dark {
+  background: var(--tile-dark);
+}
+
+.quad-cell.sanctuary-a1 {
+  background: rgba(0, 210, 255, 0.3) !important;
+  border: 1px solid var(--color-blue);
+}
+
+.quad-cell.sanctuary-i9 {
+  background: rgba(255, 51, 102, 0.3) !important;
+  border: 1px solid var(--color-red);
+}
+
+.quad-piece {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.quad-piece.red-piece {
+  background: radial-gradient(circle at 35% 35%, #ff5277, #b3002d);
+  border: 1.5px solid #ff99b3;
+}
+
+.quad-piece.blue-piece {
+  background: radial-gradient(circle at 35% 35%, #33e1ff, #006699);
+  border: 1.5px solid #99f0ff;
+}
+
+@media (max-width: 1100px) {
+  .quad-view-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 /* Responsive adjustments */
 @media (max-width: 1280px) {
   .arena-container {

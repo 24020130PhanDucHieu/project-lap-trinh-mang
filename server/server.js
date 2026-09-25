@@ -20,7 +20,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(express.json());
 
-// In-memory standard rooms storage (roomCode -> roomData)
+// In-memory standard rooms storage
 const rooms = new Map();
 
 // Tournament State: 4 Tables, 8 Players max, unlimited Spectators
@@ -44,8 +44,8 @@ function createTable(id, name) {
     id,
     name,
     players: {
-      red: null,  // { id, name, connected }
-      blue: null  // { id, name, connected }
+      red: null,
+      blue: null
     },
     gameState: {
       board: initialBoard,
@@ -112,11 +112,27 @@ app.get('/api/tournament', (req, res) => {
     moveCount: t.gameState.history.length
   }));
 
+  const allFinished = tournament.tables.every(t => !!t.gameState.winner);
+  const finishedCount = tournament.tables.filter(t => !!t.gameState.winner).length;
+
   res.json({
     title: tournament.title,
     spectatorCount: tournament.spectators.size,
+    allFinished,
+    finishedCount,
     tables: tableSummaries
   });
+});
+
+// Test helper to simulate table winners
+app.post('/api/tournament/simulate-winner', (req, res) => {
+  const { tableId, winner } = req.body;
+  const table = tournament.tables.find(t => t.id === parseInt(tableId));
+  if (!table) return res.status(404).json({ error: 'Table not found' });
+  table.gameState.winner = winner;
+  table.gameState.winReason = winner ? 'TOTAL_ELIMINATION' : null;
+  table.gameState.winDescription = winner ? `Bên ${winner} đã thắng ván đấu!` : '';
+  res.json({ success: true, tableId, winner });
 });
 
 // Explicit route for playfull.html
@@ -251,17 +267,19 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Role check: Spectators cannot move!
+    if (currentRole === 'spectator') {
+      socket.emit('move_error', { message: 'Bạn đang là Khán giả (Spectator), chỉ được xem trận đấu, không thể di chuyển quân!' });
+      return;
+    }
+
     const activePlayer = room.gameState.turn;
     const isRedTurn = activePlayer === gameLogic.PLAYERS.RED;
     const isCurrentSocketTurn = (isRedTurn && room.players.red && room.players.red.id === socket.id) ||
                                 (!isRedTurn && room.players.blue && room.players.blue.id === socket.id);
 
     if (!isCurrentSocketTurn) {
-      if (currentRole === 'spectator') {
-        socket.emit('move_error', { message: 'Bạn đang ở chế độ Khán giả (Spectator), không thể di chuyển quân!' });
-      } else {
-        socket.emit('move_error', { message: 'Chưa đến lượt của bạn!' });
-      }
+      socket.emit('move_error', { message: 'Chưa đến lượt của bạn!' });
       return;
     }
 
@@ -297,6 +315,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('client_reset_game', ({ roomCode, layout = 'frontline' }) => {
+    // SPECTATORS CANNOT RESET
+    if (currentRole === 'spectator') {
+      socket.emit('move_error', { message: 'Khán giả không có quyền reset ván đấu! Chỉ tuyển thủ đang thi đấu mới có quyền.' });
+      return;
+    }
+
     const normalizedCode = (roomCode || currentRoomCode || '1000').trim().toUpperCase();
     const room = rooms.get(normalizedCode);
     if (!room) return;
@@ -359,17 +383,18 @@ io.on('connection', (socket) => {
   });
 
   // ========================================================
-  // 2. TOURNAMENT ARENA MODE (GIẢI ĐẤU 4 BÀN - 8 TUYỂN THỦ)
+  // 2. TOURNAMENT ARENA MODE (4 BÀN - 8 TUYỂN THỦ - KHÁN GIẢ)
   // ========================================================
   socket.on('join_tournament', ({ playerName = 'Tuyển thủ', role = 'spectator', tableId = 1, color = 'auto' }) => {
     isTournamentMode = true;
-    currentName = playerName.trim() || `TuyểnThủ_${socket.id.slice(0, 4)}`;
+    currentName = playerName.trim() || `KhánGiả_${socket.id.slice(0, 4)}`;
     socket.join('ROOM_TOURNAMENT');
 
     let assignedRole = 'spectator';
     let assignedTableId = parseInt(tableId) || 1;
     let assignedColor = null;
 
+    // SPECTATORS CANNOT PARTICIPATE IN MATCHES
     if (role === 'player') {
       const table = tournament.tables.find(t => t.id === assignedTableId);
       if (table) {
@@ -391,7 +416,6 @@ io.on('connection', (socket) => {
             assignedRole = 'player';
             table.players.blue = { id: socket.id, name: currentName, connected: true };
           } else {
-            // Table full, join as spectator
             assignedRole = 'spectator';
           }
         }
@@ -407,19 +431,18 @@ io.on('connection', (socket) => {
 
     const roleNotice = assignedRole === 'player'
       ? `Tuyển thủ ${assignedColor === 'red' ? 'ĐỎ' : 'XANH'} tại Bàn ${assignedTableId}`
-      : 'Khán giả giải đấu';
+      : 'Khán giả xem giải (Chế độ xem toàn cảnh 4 bàn)';
 
     const tourSysMsg = {
       id: `tour_sys_${Date.now()}`,
       sender: 'BAN TỔ CHỨC',
       role: 'system',
-      text: `🏆 [Giải Đấu] ${currentName} đã tham gia với vai trò: ${roleNotice}`,
+      text: `🏆 [Giải Đấu] ${currentName} đã tham gia: ${roleNotice}`,
       timestamp: Date.now()
     };
     tournament.chatHistory.push(tourSysMsg);
     if (tournament.chatHistory.length > 100) tournament.chatHistory.shift();
 
-    // Send complete tournament state to user
     socket.emit('tournament_joined_success', {
       role: assignedRole,
       assignedColor,
@@ -441,7 +464,6 @@ io.on('connection', (socket) => {
       }
     });
 
-    // Broadcast tournament updates to everyone in tournament
     io.to('ROOM_TOURNAMENT').emit('tournament_state_updated', {
       tables: tournament.tables.map(t => ({
         id: t.id,
@@ -458,10 +480,20 @@ io.on('connection', (socket) => {
     io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', tourSysMsg);
   });
 
-  // Tournament Player Move
+  // Tournament Player Move (SPECTATORS CANNOT MOVE)
   socket.on('tournament_client_move', ({ tableId, from, to }) => {
+    if (currentRole !== 'player') {
+      socket.emit('move_error', { message: 'Khán giả chỉ có quyền xem, không được tham gia đi quân!' });
+      return;
+    }
+
     const table = tournament.tables.find(t => t.id === parseInt(tableId));
     if (!table) return;
+
+    if (tournamentTableId !== table.id) {
+      socket.emit('move_error', { message: `Bạn là tuyển thủ Bàn ${tournamentTableId}, không được đi quân tại Bàn ${table.id}!` });
+      return;
+    }
 
     const activePlayer = table.gameState.turn;
     const isRedTurn = activePlayer === gameLogic.PLAYERS.RED;
@@ -481,7 +513,7 @@ io.on('connection', (socket) => {
 
     table.gameState = result.newState;
 
-    // Broadcast move to all tournament viewers and players
+    // Broadcast move to ALL viewers & players so all 4 tables update in real time!
     io.to('ROOM_TOURNAMENT').emit('tournament_move_performed', {
       tableId: table.id,
       moveRecord: result.moveRecord,
@@ -503,31 +535,76 @@ io.on('connection', (socket) => {
       };
       tournament.chatHistory.push(vicMsg);
       io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', vicMsg);
+
+      // Check if all 4 tables are now finished
+      const allDone = tournament.tables.every(t => !!t.gameState.winner);
+      if (allDone) {
+        const grandFinishMsg = {
+          id: `tour_all_done_${Date.now()}`,
+          sender: 'BAN TỔ CHỨC',
+          role: 'system',
+          text: `🎉 CẢ 4 BÀN THI ĐẤU ĐÃ HOÀN TẤT! Bây giờ các tuyển thủ có thể reset để bắt đầu giải đấu mới.`,
+          timestamp: Date.now()
+        };
+        tournament.chatHistory.push(grandFinishMsg);
+        io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', grandFinishMsg);
+      }
     }
   });
 
-  // Tournament Reset Table
-  socket.on('tournament_reset_table', ({ tableId }) => {
-    const table = tournament.tables.find(t => t.id === parseInt(tableId));
-    if (!table) return;
+  // Tournament Reset Mechanism:
+  // MUST FINISH ALL 4 TABLES TO RESET!
+  // SPECTATORS CANNOT RESET!
+  socket.on('tournament_reset_all', () => {
+    // 1. Spectator check
+    if (currentRole !== 'player') {
+      socket.emit('move_error', { message: 'Khán giả không có quyền reset giải đấu! Bạn chỉ có quyền theo dõi giải.' });
+      return;
+    }
 
-    const initialBoard = gameLogic.createInitialBoard('frontline');
-    const pieceCounts = gameLogic.countPieces(initialBoard);
+    // 2. All 4 tables must be finished check
+    const allFinished = tournament.tables.every(t => !!t.gameState.winner);
+    if (!allFinished) {
+      const finishedCount = tournament.tables.filter(t => !!t.gameState.winner).length;
+      socket.emit('move_error', {
+        message: `Chưa thể reset giải đấu! Hiện tại mới có ${finishedCount}/4 bàn kết thúc. Phải thi đấu xong cả 4 bàn mới được phép reset!`
+      });
+      return;
+    }
 
-    table.gameState = {
-      board: initialBoard,
-      turn: gameLogic.PLAYERS.RED,
-      pieceCounts,
-      winner: null,
-      winReason: null,
-      winDescription: '',
-      history: []
-    };
-
-    io.to('ROOM_TOURNAMENT').emit('tournament_table_reset', {
-      tableId: table.id,
-      gameState: table.gameState
+    // Reset all 4 tables
+    tournament.tables.forEach(t => {
+      const initialBoard = gameLogic.createInitialBoard('frontline');
+      const pieceCounts = gameLogic.countPieces(initialBoard);
+      t.gameState = {
+        board: initialBoard,
+        turn: gameLogic.PLAYERS.RED,
+        pieceCounts,
+        winner: null,
+        winReason: null,
+        winDescription: '',
+        history: []
+      };
     });
+
+    const resetMsg = {
+      id: `tour_reset_${Date.now()}`,
+      sender: 'BAN TỔ CHỨC',
+      role: 'system',
+      text: `🔄 Toàn bộ 4 bàn thi đấu đã được reset sau khi hoàn tất cả 4 trận! Vòng đấu mới bắt đầu.`,
+      timestamp: Date.now()
+    };
+    tournament.chatHistory.push(resetMsg);
+
+    io.to('ROOM_TOURNAMENT').emit('tournament_all_reset', {
+      tables: tournament.tables.map(t => ({
+        id: t.id,
+        name: t.name,
+        players: t.players,
+        gameState: t.gameState
+      }))
+    });
+    io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', resetMsg);
   });
 
   // Tournament Chat & Reaction
@@ -560,9 +637,7 @@ io.on('connection', (socket) => {
     });
   });
 
-  // ==========================================
-  // DISCONNECTION HANDLER
-  // ==========================================
+  // Disconnection handler
   socket.on('disconnect', () => {
     if (isTournamentMode) {
       if (tournamentTableId) {
@@ -641,6 +716,6 @@ server.listen(PORT, '0.0.0.0', () => {
       console.log(`   👉 http://${ip}:${PORT}/playfull.html`);
     });
   }
-  console.log(`🏆 Hỗ trợ: Mã phòng 2 người & Giải Đấu 4 Bàn (8 Tuyển thủ) + 100+ Khán giả!`);
+  console.log(`🏆 Hỗ trợ: Mã phòng 2 người & Giải Đấu 4 Bàn (8 Tuyển thủ) + Khán Giả Xem Toàn Cảnh!`);
   console.log('========================================================');
 });
