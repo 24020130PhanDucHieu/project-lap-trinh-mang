@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OTTv2 - Đấu Trường Oẳn Tù Tì 9x9 Multiplayer & Spectator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/animations.css">
+</head>
+<body>
+  <!-- Header / Navigation Bar -->
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-icon">⚔️</span>
+      <div>
+        <span class="brand-title">OTTv2 ARENA</span>
+        <span class="brand-badge">9x9 SERVER</span>
+      </div>
+    </div>
+
+    <div class="header-actions">
+      <!-- Live Indicator & Spectator Count -->
+      <div class="badge-live">
+        <span class="badge-live-dot"></span>
+        <span>TRỰC TIẾP</span>
+      </div>
+
+      <div class="badge-spectator">
+        <span>👁️</span>
+        <span id="spectator-count-text">0 Khán giả</span>
+      </div>
+
+      <span id="badge-my-role" class="brand-badge" style="background: rgba(255,190,11,0.15); color: var(--color-gold); border-color: rgba(255,190,11,0.3);">
+        Đang kết nối...
+      </span>
+
+      <!-- Action Buttons -->
+      <button id="btn-share-room" class="btn btn-primary" title="Chia sẻ link mời chơi hoặc link khán giả">
+        <span>🔗</span> Chia Sẻ Phòng
+      </button>
+
+      <button id="btn-rules" class="btn btn-glass" title="Xem luật chơi OTTv2">
+        <span>📖</span> Luật Chơi
+      </button>
+
+      <button id="btn-sound-toggle" class="btn btn-glass btn-icon" title="Bật/Tắt âm thanh">
+        🔊
+      </button>
+
+      <a href="index.html" class="btn btn-glass" title="Quay lại sảnh chính">
+        <span>🏠</span> Sảnh
+      </a>
+    </div>
+  </header>
+
+  <!-- Main Game Arena -->
+  <main class="arena-container">
+    <!-- LEFT SIDEBAR: Red Player HUD (Player 1) -->
+    <aside class="player-card red-theme glass-panel" id="card-player-red">
+      <div class="player-header">
+        <div class="player-avatar red-avatar">🔴</div>
+        <div class="player-info">
+          <div class="player-name" id="name-player-red">Đang chờ tuyển thủ...</div>
+          <div class="player-status-badge" style="background: var(--color-red-bg); color: var(--color-red);">
+            QUÂN ĐỎ (Player 1)
+          </div>
+        </div>
+      </div>
+
+      <!-- Inventory Table -->
+      <div class="inventory-section">
+        <div class="inventory-title">
+          <span>Lực Lượng Quân Đỏ</span>
+          <span style="font-size: 10px; color: var(--color-red)">Mất 1 loại quân là THUA</span>
+        </div>
+        <div class="inventory-list">
+          <div class="inv-item">
+            <span class="inv-icon">✊</span>
+            <span class="inv-name">ĐẤM</span>
+            <span class="inv-count" id="inv-red-rock">3/3</span>
+          </div>
+          <div class="inv-item">
+            <span class="inv-icon">✋</span>
+            <span class="inv-name">LÁ</span>
+            <span class="inv-count" id="inv-red-paper">3/3</span>
+          </div>
+          <div class="inv-item">
+            <span class="inv-icon">✌️</span>
+            <span class="inv-name">KÉO</span>
+            <span class="inv-count" id="inv-red-scissors">3/3</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Goal Sanctuary Badge -->
+      <div class="goal-reminder">
+        <span>🏆 Mục tiêu chiến thắng: Tiến vào ô</span>
+        <span class="goal-target-square">i9</span>
+      </div>
+
+      <!-- Combat Quick Cheat Sheet -->
+      <div style="background: rgba(0,0,0,0.2); border-radius: 8px; padding: 10px; font-size: 11px; line-height: 1.6; color: var(--text-muted); border: 1px solid var(--border-glass);">
+        <strong style="color: var(--text-main); display: block; margin-bottom: 4px;">⚡ Quy Tắc Tác Chiến:</strong>
+        • ✊ Đấm ăn ✌️ Kéo<br>
+        • ✌️ Kéo ăn ✋ Lá<br>
+        • ✋ Lá ăn ✊ Đấm<br>
+        • Hai quân cùng loại: <strong>Chặn đường</strong> nhau!
+      </div>
+    </aside>
+
+    <!-- CENTER: 9x9 Board Arena -->
+    <section class="board-arena-wrapper">
+      <div id="turn-status-banner" class="turn-banner">
+        ⏳ Đang kết nối tới máy chủ...
+      </div>
+
+      <div class="board-outer">
+        <!-- Top Coordinate Labels (a - i) -->
+        <div class="coords-row-top">
+          <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
+        </div>
+
+        <!-- Left Numbers (9 down to 1) -->
+        <div class="coords-col-left">
+          <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
+
+        <!-- 9x9 Grid (81 Squares) -->
+        <div id="board-grid" class="board-grid-9x9"></div>
+
+        <!-- Right Numbers (9 down to 1) -->
+        <div class="coords-col-right">
+          <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
+        </div>
+
+        <!-- Bottom Coordinate Labels (a - i) -->
+        <div class="coords-row-bottom">
+          <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
+        </div>
+      </div>
+
+      <!-- Floating Reactions Trigger Bar (for 100+ Spectators & Players) -->
+      <div class="reactions-bar glass-panel" style="width: 100%; max-width: 580px;">
+        <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">Thả cảm xúc:</span>
+        <button class="reaction-btn" data-emoji="👏" title="Vỗ tay">👏</button>
+        <button class="reaction-btn" data-emoji="🔥" title="Đỉnh cao">🔥</button>
+        <button class="reaction-btn" data-emoji="😱" title="Kịch tính">😱</button>
+        <button class="reaction-btn" data-emoji="🤯" title="Không ngờ">🤯</button>
+        <button class="reaction-btn" data-emoji="👑" title="Out trình">👑</button>
+        <button class="reaction-btn" data-emoji="🎯" title="Chuẩn xác">🎯</button>
+        <button class="reaction-btn" data-emoji="🚀" title="Tiến lên">🚀</button>
+        <button class="reaction-btn" data-emoji="❤️" title="Cổ vũ">❤️</button>
+        <button class="reaction-btn" data-emoji="⚔️" title="Chiến">⚔️</button>
+      </div>
+    </section>
+
+    <!-- RIGHT SIDEBAR: Blue Player HUD, Match History & Live Chat -->
+    <aside class="right-sidebar">
+      <!-- Blue Player HUD (Player 2) -->
+      <div class="player-card blue-theme glass-panel" id="card-player-blue">
+        <div class="player-header">
+          <div class="player-avatar blue-avatar">🔵</div>
+          <div class="player-info">
+            <div class="player-name" id="name-player-blue">Đang chờ tuyển thủ...</div>
+            <div class="player-status-badge" style="background: var(--color-blue-bg); color: var(--color-blue);">
+              QUÂN XANH (Player 2)
+            </div>
+          </div>
+        </div>
+
+        <!-- Inventory Table -->
+        <div class="inventory-section">
+          <div class="inventory-title">
+            <span>Lực Lượng Quân Xanh</span>
+            <span style="font-size: 10px; color: var(--color-blue)">Mất 1 loại quân là THUA</span>
+          </div>
+          <div class="inventory-list">
+            <div class="inv-item">
+              <span class="inv-icon">✊</span>
+              <span class="inv-name">ĐẤM</span>
+              <span class="inv-count" id="inv-blue-rock">3/3</span>
+            </div>
+            <div class="inv-item">
+              <span class="inv-icon">✋</span>
+              <span class="inv-name">LÁ</span>
+              <span class="inv-count" id="inv-blue-paper">3/3</span>
+            </div>
+            <div class="inv-item">
+              <span class="inv-icon">✌️</span>
+              <span class="inv-name">KÉO</span>
+              <span class="inv-count" id="inv-blue-scissors">3/3</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Goal Sanctuary Badge -->
+        <div class="goal-reminder">
+          <span>🏆 Mục tiêu chiến thắng: Tiến vào ô</span>
+          <span class="goal-target-square">a1</span>
+        </div>
+      </div>
+
+      <!-- Match History -->
+      <div class="match-history-card glass-panel">
+        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px;">
+          📜 Nhật Ký Nước Đi
+        </div>
+        <div id="history-list" class="history-scroll"></div>
+      </div>
+
+      <!-- Live Chat & Spectator Messages -->
+      <div class="chat-card glass-panel">
+        <div style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); margin-bottom: 8px; display: flex; justify-content: space-between;">
+          <span>💬 Bình Luận Trận Đấu</span>
+          <span style="font-size: 10px; color: var(--color-green)">● Hoạt động</span>
+        </div>
+        <div id="chat-messages" class="chat-messages"></div>
+        <form id="chat-form" class="chat-input-bar">
+          <input type="text" id="chat-input" class="chat-input" placeholder="Nhập tin nhắn bình luận..." maxlength="150" autocomplete="off">
+          <button type="submit" class="btn btn-primary" style="padding: 8px 14px;">Gửi</button>
+        </form>
+      </div>
+    </aside>
+  </main>
+
+  <!-- Floating Reactions Animation Layer -->
+  <div id="floating-reactions-layer"></div>
+
+  <!-- MODAL: Share Room & QR Code -->
+  <div id="share-modal" class="modal-overlay">
+    <div class="modal-content glass-panel-glow">
+      <div class="modal-header">
+        <h3 class="modal-title">🔗 Chia Sẻ Phòng Đấu OTTv2</h3>
+        <button class="btn btn-glass btn-icon btn-close-modal">✕</button>
+      </div>
+
+      <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
+        Gửi liên kết dưới đây cho <strong>thầy giáo</strong> hoặc bạn bè để cùng vào thi đấu trực tiếp, hoặc cho khán giả vào xem trận đấu!
+      </p>
+
+      <!-- Player 2 Link -->
+      <div class="share-link-group">
+        <label class="share-link-label">👉 Link dành cho Tuyển thủ (Player 2):</label>
+        <div class="share-link-box">
+          <input type="text" id="share-player-url" class="share-link-input" readonly>
+          <button class="btn btn-primary btn-copy-link" data-target="share-player-url">Sao Chép</button>
+        </div>
+      </div>
+
+      <!-- Spectator Link -->
+      <div class="share-link-group">
+        <label class="share-link-label">👁️ Link dành cho Khán giả xem trực tiếp (Hỗ trợ 100+ người xem):</label>
+        <div class="share-link-box">
+          <input type="text" id="share-spectator-url" class="share-link-input" readonly>
+          <button class="btn btn-glass btn-copy-link" data-target="share-spectator-url">Sao Chép</button>
+        </div>
+      </div>
+
+      <!-- QR Code for Mobile Scanning -->
+      <div class="qr-container">
+        <img id="share-qr-image" src="" alt="QR Code" width="160" height="160" style="border-radius: 8px;">
+        <span style="font-size: 12px; font-weight: 600; color: #111;">Quét mã QR để vào phòng trên điện thoại</span>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end;">
+        <button class="btn btn-glass btn-close-modal">Đóng</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Rules Guide -->
+  <div id="rules-modal" class="modal-overlay">
+    <div class="modal-content glass-panel-glow">
+      <div class="modal-header">
+        <h3 class="modal-title">📖 Luật Chơi Oẳn Tù Tì v2 (OTTv2 9x9)</h3>
+        <button class="btn btn-glass btn-icon btn-close-modal">✕</button>
+      </div>
+
+      <div style="font-size: 13px; line-height: 1.7; color: var(--text-main); display: flex; flex-direction: column; gap: 14px;">
+        <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border-left: 4px solid var(--color-blue);">
+          <strong>1. Bàn cờ và Cách di chuyển:</strong>
+          <p>• Bàn cờ kích thước 9x9 ô vuông (cột a-i, hàng 1-9).</p>
+          <p>• Mỗi bên có 9 quân: <strong>3 Đấm (✊), 3 Lá (✋), 3 Kéo (✌️)</strong>.</p>
+          <p>• Mỗi quân cờ được di chuyển <strong>1 ô theo mọi hướng trong 8 hướng</strong> (ngang, dọc, chéo - tương tự như quân Vua trong cờ vua).</p>
+        </div>
+
+        <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border-left: 4px solid var(--color-gold);">
+          <strong>2. Quy tắc Ăn quân (Chuẩn Oẳn Tù Tì):</strong>
+          <p>• ✊ <strong>Đấm</strong> ăn ✌️ <strong>Kéo</strong>.</p>
+          <p>• ✌️ <strong>Kéo</strong> ăn ✋ <strong>Lá</strong>.</p>
+          <p>• ✋ <strong>Lá</strong> ăn ✊ <strong>Đấm</strong>.</p>
+          <p>• <strong>Hai quân cùng loại</strong> (Đấm vs Đấm, Lá vs Lá, Kéo vs Kéo): <em>Không thể ăn nhau mà chỉ đứng chặn đường nhau</em>.</p>
+          <p>• Quân yếu thế không thể tấn công quân khắc chế mình.</p>
+        </div>
+
+        <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border-left: 4px solid var(--color-red);">
+          <strong>3. Điều kiện Thắng (Có 2 cách thắng):</strong>
+          <p>🏆 <strong>Cách 1 (Tuyệt diệt 1 loại quân):</strong> Ăn sạch hoàn toàn 1 loại quân của đối phương (ví dụ ăn hết 3 quân Đấm, hoặc ăn hết 3 quân Kéo, hoặc ăn hết 3 quân Lá của đối thủ).</p>
+          <p>🏰 <strong>Cách 2 (Chiếm căn cứ đối phương):</strong> Đưa bất kỳ 1 quân cờ nào của mình tiến vào căn cứ chiến lược:</p>
+          <p>&nbsp;&nbsp;• Quân ĐỎ (Player 1) tiến vào ô <strong>i9</strong> ➔ ĐỎ THẮNG!</p>
+          <p>&nbsp;&nbsp;• Quân XANH (Player 2) tiến vào ô <strong>a1</strong> ➔ XANH THẮNG!</p>
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end;">
+        <button class="btn btn-primary btn-close-modal">Đã Hiểu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Victory / Defeat Celebration -->
+  <div id="victory-modal" class="modal-overlay">
+    <div class="modal-content glass-panel-glow animate-victory" style="text-align: center;">
+      <div style="font-size: 64px; margin-bottom: 10px;">🏆</div>
+      <h2 id="victory-title" class="modal-title" style="font-size: 26px;">CHIẾN THẮNG!</h2>
+      <p id="victory-desc" style="font-size: 15px; color: var(--text-muted); margin: 12px 0 24px 0; line-height: 1.5;"></p>
+      
+      <div style="display: flex; gap: 12px; justify-content: center;">
+        <button id="btn-rematch" class="btn btn-crimson" style="padding: 10px 24px; font-size: 15px;">
+          🔄 Ván Mới / Tái Đấu
+        </button>
+        <button class="btn btn-glass btn-close-modal">
+          Đóng
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Scripts -->
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/gameEngine.js"></script>
+  <script src="js/playfullClient.js"></script>
+  <script src="js/aiBot.js"></script>
+  <script src="js/ui.js"></script>
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      window.GameUI.init('online');
+    });
+  </script>
+</body>
+</html>

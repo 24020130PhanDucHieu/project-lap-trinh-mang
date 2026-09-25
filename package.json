@@ -1,0 +1,32 @@
+{
+  "name": "ottv2-oan-tu-ti-multiplayer",
+  "version": "2.0.0",
+  "description": "Dự án Lập trình mạng: Web Game Oẳn Tù Tì v2 (OTTv2) 9x9 Multiplayer Server & Spectator Room",
+  "main": "server/server.js",
+  "scripts": {
+    "start": "node server/server.js",
+    "dev": "node --watch server/server.js",
+    "test": "node test_rules.js && node test_server.js",
+    "tunnel": "node server/tunnel.js"
+  },
+  "keywords": [
+    "oan-tu-ti",
+    "rock-paper-scissors",
+    "board-game",
+    "socketio",
+    "websocket",
+    "network-programming",
+    "multiplayer",
+    "spectator-mode"
+  ],
+  "author": "Nhom Sinh Vien - Lap Trinh Mang",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "localtunnel": "^2.0.2",
+    "socket.io-client": "^4.8.3"
+  }
+}
