@@ -20,8 +20,44 @@ const PORT = process.env.PORT || 3000;
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(express.json());
 
-// In-memory room storage
+// In-memory standard rooms storage (roomCode -> roomData)
 const rooms = new Map();
+
+// Tournament State: 4 Tables, 8 Players max, unlimited Spectators
+const tournament = {
+  id: 'TOURNAMENT_2026',
+  title: 'GIẢI ĐẤU VÔ ĐỊCH OTTv2 - 4 BÀN THI ĐẤU CHUYÊN NGHIỆP',
+  tables: [
+    createTable(1, 'Bàn 1 (Trận 1)'),
+    createTable(2, 'Bàn 2 (Trận 2)'),
+    createTable(3, 'Bàn 3 (Trận 3)'),
+    createTable(4, 'Bàn 4 (Trận 4 - Chung Kết)')
+  ],
+  spectators: new Map(), // socketId -> { name, joinedAt }
+  chatHistory: []
+};
+
+function createTable(id, name) {
+  const initialBoard = gameLogic.createInitialBoard('frontline');
+  const pieceCounts = gameLogic.countPieces(initialBoard);
+  return {
+    id,
+    name,
+    players: {
+      red: null,  // { id, name, connected }
+      blue: null  // { id, name, connected }
+    },
+    gameState: {
+      board: initialBoard,
+      turn: gameLogic.PLAYERS.RED,
+      pieceCounts,
+      winner: null,
+      winReason: null,
+      winDescription: '',
+      history: []
+    }
+  };
+}
 
 // Helper: Get local network IP addresses
 function getLocalIpAddresses() {
@@ -64,14 +100,33 @@ app.get('/api/rooms', (req, res) => {
   res.json({ rooms: roomList });
 });
 
+// Tournament status API
+app.get('/api/tournament', (req, res) => {
+  const tableSummaries = tournament.tables.map(t => ({
+    id: t.id,
+    name: t.name,
+    redPlayer: t.players.red ? t.players.red.name : null,
+    bluePlayer: t.players.blue ? t.players.blue.name : null,
+    winner: t.gameState.winner,
+    turn: t.gameState.turn,
+    moveCount: t.gameState.history.length
+  }));
+
+  res.json({
+    title: tournament.title,
+    spectatorCount: tournament.spectators.size,
+    tables: tableSummaries
+  });
+});
+
 // Explicit route for playfull.html
 app.get('/playfull.html', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/playfull.html'));
 });
 
-// Helper: create or get room
+// Helper: create or get standard room
 function getOrCreateRoom(code, options = {}) {
-  const normalizedCode = (code || 'GLOBAL').trim().toUpperCase();
+  const normalizedCode = (code || '1000').trim().toUpperCase();
   if (!rooms.has(normalizedCode)) {
     const layout = options.layout || 'frontline';
     const initialBoard = gameLogic.createInitialBoard(layout);
@@ -79,14 +134,14 @@ function getOrCreateRoom(code, options = {}) {
 
     rooms.set(normalizedCode, {
       code: normalizedCode,
-      title: options.title || `Trận Đấu ${normalizedCode}`,
+      title: options.title || `Phòng ${normalizedCode}`,
       layout,
       createdAt: Date.now(),
       players: {
-        red: null,   // { id, name, connected }
-        blue: null   // { id, name, connected }
+        red: null,
+        blue: null
       },
-      spectators: new Map(), // socketId -> { name, joinedAt }
+      spectators: new Map(),
       gameState: {
         board: initialBoard,
         turn: gameLogic.PLAYERS.RED,
@@ -102,36 +157,34 @@ function getOrCreateRoom(code, options = {}) {
   return rooms.get(normalizedCode);
 }
 
-// Socket.IO real-time multiplayer & 100+ spectator engine
+// Socket.IO real-time multiplayer & tournament engine
 io.on('connection', (socket) => {
   let currentRoomCode = null;
   let currentRole = null; // 'red', 'blue', or 'spectator'
   let currentName = 'Khách';
+  let isTournamentMode = false;
+  let tournamentTableId = null;
 
-  // Join Room Event
-  socket.on('join_game', ({ roomCode = 'GLOBAL', playerName = 'Người chơi', role = 'auto', layout = 'frontline' }) => {
+  // ==========================================
+  // 1. STANDARD 2-PLAYER ROOM (MÃ PHÒNG NHANH)
+  // ==========================================
+  socket.on('join_game', ({ roomCode = '1000', playerName = 'Người chơi', role = 'auto', layout = 'frontline' }) => {
+    isTournamentMode = false;
     const normalizedCode = roomCode.trim().toUpperCase();
     const room = getOrCreateRoom(normalizedCode, { layout });
     currentRoomCode = normalizedCode;
-    currentName = playerName.trim() || `Khách_${socket.id.slice(0, 4)}`;
+    currentName = playerName.trim() || `NgườiChơi_${socket.id.slice(0, 4)}`;
 
     socket.join(normalizedCode);
 
-    // Determine Role
     let assignedRole = 'spectator';
-
     if (role === 'red') {
-      if (!room.players.red || !room.players.red.connected) {
-        assignedRole = 'red';
-      }
+      if (!room.players.red || !room.players.red.connected) assignedRole = 'red';
     } else if (role === 'blue') {
-      if (!room.players.blue || !room.players.blue.connected) {
-        assignedRole = 'blue';
-      }
+      if (!room.players.blue || !room.players.blue.connected) assignedRole = 'blue';
     } else if (role === 'spectator') {
       assignedRole = 'spectator';
     } else {
-      // 'auto' mode: join as player if slot free, else spectator
       if (!room.players.red || !room.players.red.connected) {
         assignedRole = 'red';
       } else if (!room.players.blue || !room.players.blue.connected) {
@@ -151,22 +204,20 @@ io.on('connection', (socket) => {
       room.spectators.set(socket.id, { name: currentName, joinedAt: Date.now() });
     }
 
-    // System announcement message
-    const roleText = assignedRole === 'red' ? 'Cầm quân ĐỎ (Player 1)' :
-                     assignedRole === 'blue' ? 'Cầm quân XANH (Player 2)' :
-                     'Khán giả theo dõi trận đấu (Spectator)';
+    const roleText = assignedRole === 'red' ? 'Quân ĐỎ (Player 1)' :
+                     assignedRole === 'blue' ? 'Quân XANH (Player 2)' :
+                     'Khán giả theo dõi (Spectator)';
     
     const sysMsg = {
       id: `sys_${Date.now()}_${Math.random()}`,
       sender: 'HỆ THỐNG',
       role: 'system',
-      text: `👋 ${currentName} đã tham gia phòng với vai trò: ${roleText}`,
+      text: `👋 ${currentName} đã vào phòng [${normalizedCode}] với vai trò: ${roleText}`,
       timestamp: Date.now()
     };
     room.chatHistory.push(sysMsg);
     if (room.chatHistory.length > 100) room.chatHistory.shift();
 
-    // Send full room state to the newly connected user
     socket.emit('joined_game_success', {
       roomCode: normalizedCode,
       role: assignedRole,
@@ -180,7 +231,6 @@ io.on('connection', (socket) => {
       chatHistory: room.chatHistory
     });
 
-    // Broadcast room update to all participants and 100+ spectators
     io.to(normalizedCode).emit('room_state_updated', {
       players: {
         red: room.players.red ? { name: room.players.red.name, connected: room.players.red.connected } : null,
@@ -193,16 +243,14 @@ io.on('connection', (socket) => {
     io.to(normalizedCode).emit('new_chat_message', sysMsg);
   });
 
-  // Client Make Move Event
   socket.on('client_move', ({ roomCode, from, to }) => {
-    const normalizedCode = (roomCode || currentRoomCode || 'GLOBAL').trim().toUpperCase();
+    const normalizedCode = (roomCode || currentRoomCode || '1000').trim().toUpperCase();
     const room = rooms.get(normalizedCode);
     if (!room) {
       socket.emit('move_error', { message: 'Phòng không tồn tại!' });
       return;
     }
 
-    // Role check: Only player whose turn it is can move!
     const activePlayer = room.gameState.turn;
     const isRedTurn = activePlayer === gameLogic.PLAYERS.RED;
     const isCurrentSocketTurn = (isRedTurn && room.players.red && room.players.red.id === socket.id) ||
@@ -210,31 +258,27 @@ io.on('connection', (socket) => {
 
     if (!isCurrentSocketTurn) {
       if (currentRole === 'spectator') {
-        socket.emit('move_error', { message: 'Bạn đang ở chế độ Người xem (Spectator), không thể di chuyển quân!' });
+        socket.emit('move_error', { message: 'Bạn đang ở chế độ Khán giả (Spectator), không thể di chuyển quân!' });
       } else {
         socket.emit('move_error', { message: 'Chưa đến lượt của bạn!' });
       }
       return;
     }
 
-    // Validate and process move with game logic engine
     const result = gameLogic.makeMove(room.gameState, from, to);
     if (!result.valid) {
       socket.emit('move_error', { message: result.error });
       return;
     }
 
-    // Update room game state
     room.gameState = result.newState;
 
-    // Broadcast move to ALL participants & 100+ spectators simultaneously
     io.to(normalizedCode).emit('move_performed', {
       moveRecord: result.moveRecord,
       capturedPiece: result.capturedPiece,
       gameState: room.gameState
     });
 
-    // If game ended, broadcast victory announcement to chat
     if (room.gameState.winner) {
       const winnerName = room.gameState.winner === gameLogic.PLAYERS.RED
         ? (room.players.red ? room.players.red.name : 'Quân ĐỎ')
@@ -252,19 +296,10 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Client Reset / Rematch Event
   socket.on('client_reset_game', ({ roomCode, layout = 'frontline' }) => {
-    const normalizedCode = (roomCode || currentRoomCode || 'GLOBAL').trim().toUpperCase();
+    const normalizedCode = (roomCode || currentRoomCode || '1000').trim().toUpperCase();
     const room = rooms.get(normalizedCode);
     if (!room) return;
-
-    // Only players can reset
-    const isPlayer = (room.players.red && room.players.red.id === socket.id) ||
-                     (room.players.blue && room.players.blue.id === socket.id);
-    if (!isPlayer) {
-      socket.emit('move_error', { message: 'Chỉ tuyển thủ mới có thể khởi động lại bàn cờ!' });
-      return;
-    }
 
     const initialBoard = gameLogic.createInitialBoard(layout);
     const pieceCounts = gameLogic.countPieces(initialBoard);
@@ -288,15 +323,12 @@ io.on('connection', (socket) => {
     };
     room.chatHistory.push(resetMsg);
 
-    io.to(normalizedCode).emit('game_reset', {
-      gameState: room.gameState
-    });
+    io.to(normalizedCode).emit('game_reset', { gameState: room.gameState });
     io.to(normalizedCode).emit('new_chat_message', resetMsg);
   });
 
-  // Chat message event
   socket.on('client_send_chat', ({ roomCode, text }) => {
-    const normalizedCode = (roomCode || currentRoomCode || 'GLOBAL').trim().toUpperCase();
+    const normalizedCode = (roomCode || currentRoomCode || '1000').trim().toUpperCase();
     const room = rooms.get(normalizedCode);
     if (!room || !text || !text.trim()) return;
 
@@ -307,16 +339,14 @@ io.on('connection', (socket) => {
       text: text.trim().slice(0, 200),
       timestamp: Date.now()
     };
-
     room.chatHistory.push(chatMsg);
     if (room.chatHistory.length > 100) room.chatHistory.shift();
 
     io.to(normalizedCode).emit('new_chat_message', chatMsg);
   });
 
-  // Floating Emoji Reaction Event (for players and 100+ spectators)
   socket.on('client_send_reaction', ({ roomCode, emoji }) => {
-    const normalizedCode = (roomCode || currentRoomCode || 'GLOBAL').trim().toUpperCase();
+    const normalizedCode = (roomCode || currentRoomCode || '1000').trim().toUpperCase();
     const validEmojis = ['👏', '🔥', '😱', '🤯', '👑', '🎯', '🚀', '❤️', '⚔️', '🛡️'];
     if (!validEmojis.includes(emoji)) return;
 
@@ -328,8 +358,237 @@ io.on('connection', (socket) => {
     });
   });
 
-  // Disconnection handler
+  // ========================================================
+  // 2. TOURNAMENT ARENA MODE (GIẢI ĐẤU 4 BÀN - 8 TUYỂN THỦ)
+  // ========================================================
+  socket.on('join_tournament', ({ playerName = 'Tuyển thủ', role = 'spectator', tableId = 1, color = 'auto' }) => {
+    isTournamentMode = true;
+    currentName = playerName.trim() || `TuyểnThủ_${socket.id.slice(0, 4)}`;
+    socket.join('ROOM_TOURNAMENT');
+
+    let assignedRole = 'spectator';
+    let assignedTableId = parseInt(tableId) || 1;
+    let assignedColor = null;
+
+    if (role === 'player') {
+      const table = tournament.tables.find(t => t.id === assignedTableId);
+      if (table) {
+        if (color === 'red' && (!table.players.red || !table.players.red.connected)) {
+          assignedColor = 'red';
+          assignedRole = 'player';
+          table.players.red = { id: socket.id, name: currentName, connected: true };
+        } else if (color === 'blue' && (!table.players.blue || !table.players.blue.connected)) {
+          assignedColor = 'blue';
+          assignedRole = 'player';
+          table.players.blue = { id: socket.id, name: currentName, connected: true };
+        } else if (color === 'auto') {
+          if (!table.players.red || !table.players.red.connected) {
+            assignedColor = 'red';
+            assignedRole = 'player';
+            table.players.red = { id: socket.id, name: currentName, connected: true };
+          } else if (!table.players.blue || !table.players.blue.connected) {
+            assignedColor = 'blue';
+            assignedRole = 'player';
+            table.players.blue = { id: socket.id, name: currentName, connected: true };
+          } else {
+            // Table full, join as spectator
+            assignedRole = 'spectator';
+          }
+        }
+      }
+    }
+
+    if (assignedRole === 'spectator') {
+      tournament.spectators.set(socket.id, { name: currentName, joinedAt: Date.now() });
+    }
+
+    currentRole = assignedRole;
+    tournamentTableId = (assignedRole === 'player') ? assignedTableId : null;
+
+    const roleNotice = assignedRole === 'player'
+      ? `Tuyển thủ ${assignedColor === 'red' ? 'ĐỎ' : 'XANH'} tại Bàn ${assignedTableId}`
+      : 'Khán giả giải đấu';
+
+    const tourSysMsg = {
+      id: `tour_sys_${Date.now()}`,
+      sender: 'BAN TỔ CHỨC',
+      role: 'system',
+      text: `🏆 [Giải Đấu] ${currentName} đã tham gia với vai trò: ${roleNotice}`,
+      timestamp: Date.now()
+    };
+    tournament.chatHistory.push(tourSysMsg);
+    if (tournament.chatHistory.length > 100) tournament.chatHistory.shift();
+
+    // Send complete tournament state to user
+    socket.emit('tournament_joined_success', {
+      role: assignedRole,
+      assignedColor,
+      assignedTableId,
+      playerName: currentName,
+      tournament: {
+        title: tournament.title,
+        tables: tournament.tables.map(t => ({
+          id: t.id,
+          name: t.name,
+          players: {
+            red: t.players.red ? { name: t.players.red.name, connected: t.players.red.connected } : null,
+            blue: t.players.blue ? { name: t.players.blue.name, connected: t.players.blue.connected } : null
+          },
+          gameState: t.gameState
+        })),
+        spectatorCount: tournament.spectators.size,
+        chatHistory: tournament.chatHistory
+      }
+    });
+
+    // Broadcast tournament updates to everyone in tournament
+    io.to('ROOM_TOURNAMENT').emit('tournament_state_updated', {
+      tables: tournament.tables.map(t => ({
+        id: t.id,
+        name: t.name,
+        players: {
+          red: t.players.red ? { name: t.players.red.name, connected: t.players.red.connected } : null,
+          blue: t.players.blue ? { name: t.players.blue.name, connected: t.players.blue.connected } : null
+        },
+        gameState: t.gameState
+      })),
+      spectatorCount: tournament.spectators.size
+    });
+
+    io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', tourSysMsg);
+  });
+
+  // Tournament Player Move
+  socket.on('tournament_client_move', ({ tableId, from, to }) => {
+    const table = tournament.tables.find(t => t.id === parseInt(tableId));
+    if (!table) return;
+
+    const activePlayer = table.gameState.turn;
+    const isRedTurn = activePlayer === gameLogic.PLAYERS.RED;
+    const isTurn = (isRedTurn && table.players.red && table.players.red.id === socket.id) ||
+                   (!isRedTurn && table.players.blue && table.players.blue.id === socket.id);
+
+    if (!isTurn) {
+      socket.emit('move_error', { message: 'Chưa đến lượt của bạn tại bàn này!' });
+      return;
+    }
+
+    const result = gameLogic.makeMove(table.gameState, from, to);
+    if (!result.valid) {
+      socket.emit('move_error', { message: result.error });
+      return;
+    }
+
+    table.gameState = result.newState;
+
+    // Broadcast move to all tournament viewers and players
+    io.to('ROOM_TOURNAMENT').emit('tournament_move_performed', {
+      tableId: table.id,
+      moveRecord: result.moveRecord,
+      capturedPiece: result.capturedPiece,
+      gameState: table.gameState
+    });
+
+    if (table.gameState.winner) {
+      const winnerName = table.gameState.winner === gameLogic.PLAYERS.RED
+        ? (table.players.red ? table.players.red.name : 'Quân ĐỎ')
+        : (table.players.blue ? table.players.blue.name : 'Quân XANH');
+
+      const vicMsg = {
+        id: `tour_win_${Date.now()}`,
+        sender: 'TRỌNG TÀI BÀN ' + table.id,
+        role: 'system',
+        text: `🏆 [Bàn ${table.id}] ${winnerName} CHIẾN THẮNG! (${table.gameState.winDescription})`,
+        timestamp: Date.now()
+      };
+      tournament.chatHistory.push(vicMsg);
+      io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', vicMsg);
+    }
+  });
+
+  // Tournament Reset Table
+  socket.on('tournament_reset_table', ({ tableId }) => {
+    const table = tournament.tables.find(t => t.id === parseInt(tableId));
+    if (!table) return;
+
+    const initialBoard = gameLogic.createInitialBoard('frontline');
+    const pieceCounts = gameLogic.countPieces(initialBoard);
+
+    table.gameState = {
+      board: initialBoard,
+      turn: gameLogic.PLAYERS.RED,
+      pieceCounts,
+      winner: null,
+      winReason: null,
+      winDescription: '',
+      history: []
+    };
+
+    io.to('ROOM_TOURNAMENT').emit('tournament_table_reset', {
+      tableId: table.id,
+      gameState: table.gameState
+    });
+  });
+
+  // Tournament Chat & Reaction
+  socket.on('tournament_send_chat', ({ text, tableId }) => {
+    if (!text || !text.trim()) return;
+    const chatMsg = {
+      id: `tour_msg_${Date.now()}_${Math.random()}`,
+      sender: currentName,
+      role: currentRole,
+      tableId: tableId || null,
+      text: text.trim().slice(0, 200),
+      timestamp: Date.now()
+    };
+    tournament.chatHistory.push(chatMsg);
+    if (tournament.chatHistory.length > 100) tournament.chatHistory.shift();
+
+    io.to('ROOM_TOURNAMENT').emit('tournament_new_chat', chatMsg);
+  });
+
+  socket.on('tournament_send_reaction', ({ emoji, tableId }) => {
+    const validEmojis = ['👏', '🔥', '😱', '🤯', '👑', '🎯', '🚀', '❤️', '⚔️', '🛡️'];
+    if (!validEmojis.includes(emoji)) return;
+
+    io.to('ROOM_TOURNAMENT').emit('tournament_floating_reaction', {
+      emoji,
+      sender: currentName,
+      role: currentRole,
+      tableId: tableId || 1,
+      id: Math.random().toString(36).substring(2, 9)
+    });
+  });
+
+  // ==========================================
+  // DISCONNECTION HANDLER
+  // ==========================================
   socket.on('disconnect', () => {
+    if (isTournamentMode) {
+      if (tournamentTableId) {
+        const table = tournament.tables.find(t => t.id === tournamentTableId);
+        if (table) {
+          if (table.players.red && table.players.red.id === socket.id) table.players.red.connected = false;
+          if (table.players.blue && table.players.blue.id === socket.id) table.players.blue.connected = false;
+        }
+      }
+      tournament.spectators.delete(socket.id);
+
+      io.to('ROOM_TOURNAMENT').emit('tournament_state_updated', {
+        tables: tournament.tables.map(t => ({
+          id: t.id,
+          name: t.name,
+          players: {
+            red: t.players.red ? { name: t.players.red.name, connected: t.players.red.connected } : null,
+            blue: t.players.blue ? { name: t.players.blue.name, connected: t.players.blue.connected } : null
+          },
+          gameState: t.gameState
+        })),
+        spectatorCount: tournament.spectators.size
+      });
+      return;
+    }
+
     if (!currentRoomCode) return;
     const room = rooms.get(currentRoomCode);
     if (!room) return;
@@ -358,7 +617,6 @@ io.on('connection', (socket) => {
       room.spectators.delete(socket.id);
     }
 
-    // Update spectator & player status for room
     io.to(currentRoomCode).emit('room_state_updated', {
       players: {
         red: room.players.red ? { name: room.players.red.name, connected: room.players.red.connected } : null,
@@ -377,12 +635,12 @@ server.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 OTTv2 MULTIPLAYER SERVER ĐANG CHẠY TẠI PORT ${PORT}`);
   console.log(`🌐 Truy cập cục bộ: http://localhost:${PORT}`);
   if (localIps.length > 0) {
-    console.log(`📱 Truy cập trong cùng mạng Wi-Fi / LAN:`);
+    console.log(`📱 Truy cập qua mạng Wi-Fi / LAN:`);
     localIps.forEach(ip => {
       console.log(`   👉 http://${ip}:${PORT}`);
       console.log(`   👉 http://${ip}:${PORT}/playfull.html`);
     });
   }
-  console.log(`👥 Hỗ trợ phòng chơi 2 người & lên tới 100+ khán giả trực tiếp!`);
+  console.log(`🏆 Hỗ trợ: Mã phòng 2 người & Giải Đấu 4 Bàn (8 Tuyển thủ) + 100+ Khán giả!`);
   console.log('========================================================');
 });

@@ -1,16 +1,21 @@
 /**
  * OTTv2 Interactive UI Controller & Board Renderer
+ * Supports:
+ *  1. Quick 2-Player Room Code Mode (Nhập Mã Phòng Nhanh)
+ *  2. Tournament Arena Mode (4 Bàn - 8 Tuyển Thủ - Khán Giả)
+ *  3. Single-Player vs AI & Local 2P
  */
 class GameUI {
   constructor() {
-    this.mode = 'online'; // 'online', 'local', or 'ai'
+    this.mode = 'online'; // 'online', 'tournament', 'local', or 'ai'
     this.localState = null;
-    this.selectedCell = null; // { col, row }
+    this.selectedCell = null;
     this.legalMoves = [];
-    this.myRole = 'spectator'; // 'red', 'blue', or 'spectator'
+    this.myRole = 'spectator';
     this.aiBot = null;
     this.boardElement = null;
     this.isAiThinking = false;
+    this.tournamentActiveTableId = 1;
   }
 
   init(mode = 'online') {
@@ -26,6 +31,8 @@ class GameUI {
       this.initLocalGame();
     } else if (this.mode === 'local') {
       this.initLocalGame();
+    } else if (this.mode === 'tournament') {
+      this.initTournamentGame();
     } else {
       this.initOnlineGame();
     }
@@ -70,20 +77,28 @@ class GameUI {
       specCount.textContent = 'Cục bộ';
     }
 
+    const roomCodeBadge = document.getElementById('header-room-code');
+    if (roomCodeBadge) {
+      roomCodeBadge.textContent = (this.mode === 'ai') ? 'LUYỆN TẬP AI' : 'CỤC BỘ';
+    }
+
     this.showToast(`Bắt đầu trận đấu ${this.mode === 'ai' ? 'Đấu với Máy (AI)' : '2 Người Chơi Cục Bộ'}!`);
   }
 
+  // ==========================================
+  // 1. STANDARD ROOM (NHẬP MÃ PHÒNG NHANH)
+  // ==========================================
   initOnlineGame() {
     const urlParams = new URLSearchParams(window.location.search);
-    const roomCode = urlParams.get('room') || 'OTT-' + Math.floor(1000 + Math.random() * 9000);
+    const roomCode = urlParams.get('room') || Math.floor(1000 + Math.random() * 9000).toString();
     const roleParam = urlParams.get('role') || 'auto';
     const playerName = urlParams.get('name') || `Người chơi ${Math.floor(Math.random() * 100)}`;
 
-    // Set share links in modal
-    this.updateShareLinks(roomCode);
+    const roomCodeBadge = document.getElementById('header-room-code');
+    if (roomCodeBadge) roomCodeBadge.textContent = roomCode;
 
     window.PlayFull.on('connect', () => {
-      console.log('Connected to OTTv2 Game Server via Socket.io');
+      console.log('Connected to OTTv2 Game Server');
     });
 
     window.PlayFull.on('joined_success', (data) => {
@@ -94,7 +109,18 @@ class GameUI {
       this.updatePlayersUI(data.players);
       this.updateSpectatorsUI(data.spectatorCount);
       this.renderChatHistory(data.chatHistory || []);
-      this.showToast(`Tham gia phòng ${data.roomCode} thành công!`);
+      
+      const copyBtn = document.getElementById('btn-quick-copy-code');
+      if (copyBtn) {
+        copyBtn.style.display = 'inline-flex';
+        copyBtn.onclick = () => {
+          window.PlayFull.copyToClipboard(data.roomCode).then(() => {
+            this.showToast(`✅ Đã sao chép Mã Phòng: ${data.roomCode}`);
+          });
+        };
+      }
+
+      this.showToast(`Đã vào phòng [${data.roomCode}]. Gửi mã này cho bạn bè để cùng chơi!`);
     });
 
     window.PlayFull.on('room_updated', (data) => {
@@ -147,13 +173,179 @@ class GameUI {
       window.soundEngine.playReaction();
     });
 
-    // Connect and join
     window.PlayFull.init();
     window.PlayFull.joinRoom({
       roomCode,
       playerName,
       role: roleParam
     });
+  }
+
+  // ========================================================
+  // 2. TOURNAMENT ARENA MODE (4 BÀN - 8 TUYỂN THỦ - KHÁN GIẢ)
+  // ========================================================
+  initTournamentGame() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const roleParam = urlParams.get('role') || 'spectator';
+    const tableParam = parseInt(urlParams.get('table')) || 1;
+    const colorParam = urlParams.get('color') || 'auto';
+    const playerName = urlParams.get('name') || `Tuyển thủ ${Math.floor(Math.random() * 100)}`;
+
+    const roomCodeBadge = document.getElementById('header-room-code');
+    if (roomCodeBadge) roomCodeBadge.textContent = 'GIẢI ĐẤU (4 BÀN)';
+
+    // Show tournament table navigation bar
+    const tourNav = document.getElementById('tournament-nav-bar');
+    if (tourNav) tourNav.style.display = 'flex';
+
+    window.PlayFull.on('tournament_joined_success', (data) => {
+      this.myRole = data.role;
+      this.tournamentActiveTableId = data.assignedTableId || 1;
+      this.updateTournamentRoleBadge(data);
+      this.renderTournamentTablesNav(data.tournament.tables);
+      this.displayTournamentTable(this.tournamentActiveTableId);
+      this.updateSpectatorsUI(data.tournament.spectatorCount);
+      this.renderChatHistory(data.tournament.chatHistory || []);
+      this.showToast(`Chào mừng ${data.playerName} đến với Giải Đấu 4 Bàn!`);
+    });
+
+    window.PlayFull.on('tournament_state_updated', (data) => {
+      this.renderTournamentTablesNav(data.tables);
+      this.updateSpectatorsUI(data.spectatorCount);
+      // Re-render currently viewed table
+      const currentTable = data.tables.find(t => t.id === this.tournamentActiveTableId);
+      if (currentTable) {
+        this.updatePlayersUI(currentTable.players);
+        this.updateHUD(currentTable.gameState);
+      }
+    });
+
+    window.PlayFull.on('tournament_move_performed', (data) => {
+      if (data.tableId === this.tournamentActiveTableId) {
+        if (data.capturedPiece) {
+          window.soundEngine.playCapture();
+        } else {
+          window.soundEngine.playMove();
+        }
+        this.selectedCell = null;
+        this.legalMoves = [];
+        this.renderBoard(data.gameState);
+        this.updateHUD(data.gameState);
+        this.addHistoryRecord(data.moveRecord);
+
+        if (data.gameState.winner) {
+          window.soundEngine.playVictory();
+          this.showVictoryModal(data.gameState);
+        }
+      }
+      // Update badge on nav tab
+      this.updateTableNavStatus(data.tableId, data.gameState);
+    });
+
+    window.PlayFull.on('tournament_table_reset', (data) => {
+      if (data.tableId === this.tournamentActiveTableId) {
+        this.selectedCell = null;
+        this.legalMoves = [];
+        this.renderBoard(data.gameState);
+        this.updateHUD(data.gameState);
+        this.clearHistoryUI();
+        this.closeVictoryModal();
+        this.showToast(`Bàn ${data.tableId} đã được khởi động lại!`);
+      }
+    });
+
+    window.PlayFull.on('tournament_new_chat', (data) => {
+      this.appendChatMessage(data);
+      if (data.role !== 'system') window.soundEngine.playChat();
+    });
+
+    window.PlayFull.on('tournament_floating_reaction', (data) => {
+      this.spawnFloatingReaction(data.emoji);
+      window.soundEngine.playReaction();
+    });
+
+    window.PlayFull.init();
+    window.PlayFull.joinTournament({
+      playerName,
+      role: roleParam,
+      tableId: tableParam,
+      color: colorParam
+    });
+  }
+
+  renderTournamentTablesNav(tables) {
+    const nav = document.getElementById('tournament-nav-bar');
+    if (!nav || !tables) return;
+    nav.innerHTML = '';
+
+    tables.forEach(t => {
+      const btn = document.createElement('button');
+      btn.className = `btn btn-glass tour-tab-btn ${t.id === this.tournamentActiveTableId ? 'active-tab' : ''}`;
+      
+      const red = t.players.red ? t.players.red.name : 'Trống';
+      const blue = t.players.blue ? t.players.blue.name : 'Trống';
+      const isPlaying = t.players.red && t.players.blue && !t.gameState.winner;
+      const isFinished = !!t.gameState.winner;
+
+      let statusIcon = '⏳';
+      if (isPlaying) statusIcon = '⚔️';
+      if (isFinished) statusIcon = '🏆';
+
+      btn.innerHTML = `
+        <span style="font-weight: 800;">${statusIcon} Bàn ${t.id}</span>
+        <span style="font-size: 11px; opacity: 0.85;">(${red} vs ${blue})</span>
+      `;
+
+      btn.onclick = () => {
+        this.tournamentActiveTableId = t.id;
+        document.querySelectorAll('.tour-tab-btn').forEach(b => b.classList.remove('active-tab'));
+        btn.classList.add('active-tab');
+        this.displayTournamentTable(t.id);
+      };
+
+      nav.appendChild(btn);
+    });
+  }
+
+  updateTableNavStatus(tableId, gameState) {
+    // Re-render nav tab status
+    if (window.PlayFull.tournamentData && window.PlayFull.tournamentData.tables) {
+      this.renderTournamentTablesNav(window.PlayFull.tournamentData.tables);
+    }
+  }
+
+  displayTournamentTable(tableId) {
+    if (!window.PlayFull.tournamentData) return;
+    const table = window.PlayFull.tournamentData.tables.find(t => t.id === tableId);
+    if (!table) return;
+
+    this.selectedCell = null;
+    this.legalMoves = [];
+    this.renderBoard(table.gameState);
+    this.updateHUD(table.gameState);
+    this.updatePlayersUI(table.players);
+
+    // Update Turn Banner with Table Name
+    const banner = document.getElementById('turn-status-banner');
+    if (banner) {
+      const isRed = table.gameState.turn === 'red';
+      banner.innerHTML = `<strong>[Bàn ${table.id}]</strong> LƯỢT: ${isRed ? '🔴 QUÂN ĐỎ' : '🔵 QUÂN XANH'}`;
+    }
+  }
+
+  updateTournamentRoleBadge(data) {
+    const badge = document.getElementById('badge-my-role');
+    if (!badge) return;
+
+    if (data.role === 'player') {
+      badge.textContent = `Tuyển thủ: Bàn ${data.assignedTableId} (${data.assignedColor === 'red' ? 'ĐỎ' : 'XANH'})`;
+      badge.style.color = data.assignedColor === 'red' ? 'var(--color-red)' : 'var(--color-blue)';
+      badge.style.borderColor = data.assignedColor === 'red' ? 'var(--color-red)' : 'var(--color-blue)';
+    } else {
+      badge.textContent = 'Khán Giả Giải Đấu (Spectator)';
+      badge.style.color = 'var(--color-gold)';
+      badge.style.borderColor = 'var(--color-gold)';
+    }
   }
 
   bindEvents() {
@@ -164,15 +356,6 @@ class GameUI {
         const isMuted = window.soundEngine.toggleMute();
         soundBtn.innerHTML = isMuted ? '🔇' : '🔊';
         this.showToast(isMuted ? 'Đã tắt âm thanh' : 'Đã bật âm thanh');
-      });
-    }
-
-    // Share room button
-    const shareBtn = document.getElementById('btn-share-room');
-    if (shareBtn) {
-      shareBtn.addEventListener('click', () => {
-        const modal = document.getElementById('share-modal');
-        if (modal) modal.classList.add('active');
       });
     }
 
@@ -200,7 +383,7 @@ class GameUI {
         e.preventDefault();
         const text = chatInput.value.trim();
         if (!text) return;
-        if (this.mode === 'online') {
+        if (this.mode === 'online' || this.mode === 'tournament') {
           window.PlayFull.sendChat(text);
         } else {
           this.appendChatMessage({
@@ -218,7 +401,7 @@ class GameUI {
     document.querySelectorAll('.reaction-btn').forEach(btn => {
       btn.addEventListener('click', () => {
         const emoji = btn.dataset.emoji || btn.textContent.trim();
-        if (this.mode === 'online') {
+        if (this.mode === 'online' || this.mode === 'tournament') {
           window.PlayFull.sendReaction(emoji);
         } else {
           this.spawnFloatingReaction(emoji);
@@ -231,7 +414,7 @@ class GameUI {
     const rematchBtn = document.getElementById('btn-rematch');
     if (rematchBtn) {
       rematchBtn.addEventListener('click', () => {
-        if (this.mode === 'online') {
+        if (this.mode === 'online' || this.mode === 'tournament') {
           window.PlayFull.resetGame();
         } else {
           this.initLocalGame();
@@ -239,22 +422,14 @@ class GameUI {
         }
       });
     }
-
-    // Copy buttons in Share modal
-    document.querySelectorAll('.btn-copy-link').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const targetId = btn.dataset.target;
-        const input = document.getElementById(targetId);
-        if (input) {
-          window.PlayFull.copyToClipboard(input.value).then(() => {
-            this.showToast('✅ Đã sao chép liên kết vào clipboard!');
-          });
-        }
-      });
-    });
   }
 
   getCurrentGameState() {
+    if (this.mode === 'tournament') {
+      if (!window.PlayFull.tournamentData) return null;
+      const table = window.PlayFull.tournamentData.tables.find(t => t.id === this.tournamentActiveTableId);
+      return table ? table.gameState : null;
+    }
     if (this.mode === 'online') {
       return window.PlayFull.gameState;
     }
@@ -267,7 +442,6 @@ class GameUI {
 
     const board = gameState.board;
 
-    // 9 rows (from row 8 down to 0 so Row 9 is top, Row 1 is bottom)
     for (let r = 8; r >= 0; r--) {
       for (let c = 0; c < 9; c++) {
         const cell = document.createElement('div');
@@ -275,56 +449,41 @@ class GameUI {
         cell.dataset.col = c;
         cell.dataset.row = r;
 
-        // Check if this is a victory base sanctuary
         if (c === 0 && r === 0) {
           cell.classList.add('sanctuary-a1');
-          cell.title = 'Căn cứ Mục tiêu a1 (Cần chiếm bởi Quân XANH để thắng)';
+          cell.title = 'Căn cứ Mục tiêu a1 (Quân XANH đột kích để thắng)';
         } else if (c === 8 && r === 8) {
           cell.classList.add('sanctuary-i9');
-          cell.title = 'Căn cứ Mục tiêu i9 (Cần chiếm bởi Quân ĐỎ để thắng)';
+          cell.title = 'Căn cứ Mục tiêu i9 (Quân ĐỎ đột kích để thắng)';
         }
 
-        // Selection highlight
         if (this.selectedCell && this.selectedCell.col === c && this.selectedCell.row === r) {
           cell.classList.add('selected-piece');
         }
 
-        // Legal move indicators
         const matchedMove = this.legalMoves.find(m => m.col === c && m.row === r);
         if (matchedMove) {
           if (matchedMove.isCapture) {
             cell.classList.add('legal-capture');
-            cell.title = `Ăn quân đối phương bằng ${matchedMove.targetPiece ? matchedMove.targetPiece.type : 'quân cờ'}`;
           } else {
             cell.classList.add('legal-move');
-            cell.title = 'Di chuyển vào ô trống';
           }
         }
 
-        // Render piece
         const piece = board[r][c];
         if (piece) {
           const pieceEl = document.createElement('div');
           pieceEl.className = `piece ${piece.player === 'red' ? 'red-piece' : 'blue-piece'}`;
           
           let icon = '✊';
-          let name = 'ĐẤM';
-          if (piece.type === window.OTT.PIECE_TYPES.PAPER) {
-            icon = '✋';
-            name = 'LÁ';
-          } else if (piece.type === window.OTT.PIECE_TYPES.SCISSORS) {
-            icon = '✌️';
-            name = 'KÉO';
-          }
+          if (piece.type === window.OTT.PIECE_TYPES.PAPER) icon = '✋';
+          else if (piece.type === window.OTT.PIECE_TYPES.SCISSORS) icon = '✌️';
 
           pieceEl.innerHTML = icon;
-          pieceEl.title = `Quân ${name} (${piece.player === 'red' ? 'Đỏ' : 'Xanh'})`;
           cell.appendChild(pieceEl);
         }
 
-        // Click handler
         cell.addEventListener('click', () => this.handleCellClick(c, r));
-
         this.boardElement.appendChild(cell);
       }
     }
@@ -336,10 +495,23 @@ class GameUI {
 
     if (this.isAiThinking) return;
 
-    // Online permission check: can current player move?
-    if (this.mode === 'online') {
+    // Check move permission
+    if (this.mode === 'tournament') {
+      if (this.myRole !== 'player') {
+        this.showToast('Bạn đang là Khán giả tại giải đấu, không thể di chuyển quân!', 'info');
+        return;
+      }
+      if (window.PlayFull.myTableId !== this.tournamentActiveTableId) {
+        this.showToast(`Bạn là tuyển thủ tại Bàn ${window.PlayFull.myTableId}, không thể đi quân ở Bàn ${this.tournamentActiveTableId}!`, 'warning');
+        return;
+      }
+      if (window.PlayFull.myColor !== gameState.turn) {
+        this.showToast(`Chưa đến lượt của bạn! Đang là lượt của bên ${gameState.turn === 'red' ? 'Đỏ' : 'Xanh'}.`, 'warning');
+        return;
+      }
+    } else if (this.mode === 'online') {
       if (this.myRole === 'spectator') {
-        this.showToast('Bạn đang ở chế độ Người xem (Spectator), chỉ có thể theo dõi trận đấu!', 'info');
+        this.showToast('Bạn đang ở chế độ Khán giả (Spectator), chỉ có thể theo dõi trận đấu!', 'info');
         return;
       }
       if (this.myRole !== gameState.turn) {
@@ -352,7 +524,6 @@ class GameUI {
 
     const clickedPiece = gameState.board[row][col];
 
-    // If already selected a piece and clicked on a legal move target
     if (this.selectedCell) {
       const isLegal = this.legalMoves.find(m => m.col === col && m.row === row);
       if (isLegal) {
@@ -361,14 +532,14 @@ class GameUI {
       }
     }
 
-    // Selecting a piece of the active player
-    if (clickedPiece && (this.mode === 'local' ? clickedPiece.player === gameState.turn : clickedPiece.player === this.myRole)) {
+    const currentMoverColor = (this.mode === 'tournament') ? window.PlayFull.myColor : (this.mode === 'local' ? gameState.turn : this.myRole);
+
+    if (clickedPiece && clickedPiece.player === currentMoverColor) {
       this.selectedCell = { col, row };
       this.legalMoves = window.OTT.getLegalMoves(gameState.board, col, row);
       window.soundEngine.playSelect();
       this.renderBoard(gameState);
     } else {
-      // Clicked on empty or non-movable square
       this.selectedCell = null;
       this.legalMoves = [];
       this.renderBoard(gameState);
@@ -376,12 +547,11 @@ class GameUI {
   }
 
   executeMove(from, to) {
-    if (this.mode === 'online') {
+    if (this.mode === 'online' || this.mode === 'tournament') {
       window.PlayFull.makeMove(from, to);
       this.selectedCell = null;
       this.legalMoves = [];
     } else {
-      // Local or AI mode
       const result = window.OTT.makeMove(this.localState, from, to);
       if (!result.valid) {
         this.showToast(result.error, 'warning');
@@ -392,11 +562,8 @@ class GameUI {
       this.selectedCell = null;
       this.legalMoves = [];
 
-      if (result.capturedPiece) {
-        window.soundEngine.playCapture();
-      } else {
-        window.soundEngine.playMove();
-      }
+      if (result.capturedPiece) window.soundEngine.playCapture();
+      else window.soundEngine.playMove();
 
       this.renderBoard(this.localState);
       this.updateHUD(this.localState);
@@ -408,7 +575,6 @@ class GameUI {
         return;
       }
 
-      // If AI mode and now it's Blue's turn
       if (this.mode === 'ai' && this.localState.turn === 'blue') {
         this.isAiThinking = true;
         this.updateTurnBanner('Máy (AI) đang tính nước đi...');
@@ -436,11 +602,8 @@ class GameUI {
 
     if (result.valid) {
       this.localState = result.newState;
-      if (result.capturedPiece) {
-        window.soundEngine.playCapture();
-      } else {
-        window.soundEngine.playMove();
-      }
+      if (result.capturedPiece) window.soundEngine.playCapture();
+      else window.soundEngine.playMove();
       this.renderBoard(this.localState);
       this.updateHUD(this.localState);
       this.addHistoryRecord(result.moveRecord);
@@ -455,11 +618,13 @@ class GameUI {
   updateHUD(gameState) {
     if (!gameState) return;
 
-    // Update Turn Banner
     const isRed = gameState.turn === 'red';
     let bannerText = isRed ? '🔴 LƯỢT CỦA BÊN ĐỎ (Player 1)' : '🔵 LƯỢT CỦA BÊN XANH (Player 2)';
 
-    if (this.mode === 'online') {
+    if (this.mode === 'tournament') {
+      const isMyTurn = (this.myRole === 'player' && window.PlayFull.myColor === gameState.turn && window.PlayFull.myTableId === this.tournamentActiveTableId);
+      bannerText = isMyTurn ? '⚡ ĐẾN LƯỢT CỦA BẠN ĐI QUÂN!' : `LƯỢT: BÊN ${isRed ? 'ĐỎ' : 'XANH'}`;
+    } else if (this.mode === 'online') {
       if (this.myRole === gameState.turn) {
         bannerText = `⚡ ĐẾN LƯỢT CỦA BẠN (${this.myRole === 'red' ? 'ĐỎ' : 'XANH'})!`;
       } else if (this.myRole === 'spectator') {
@@ -471,7 +636,6 @@ class GameUI {
 
     this.updateTurnBanner(bannerText);
 
-    // Update Active Card Glow
     const redCard = document.getElementById('card-player-red');
     const blueCard = document.getElementById('card-player-blue');
     if (redCard && blueCard) {
@@ -484,7 +648,6 @@ class GameUI {
       }
     }
 
-    // Update piece inventories
     const counts = gameState.pieceCounts;
     this.updateInventoryCount('red', 'ROCK', counts.red.ROCK);
     this.updateInventoryCount('red', 'PAPER', counts.red.PAPER);
@@ -510,15 +673,12 @@ class GameUI {
       if (count === 1) {
         parent.classList.add('danger-low');
         parent.classList.remove('extinct');
-        parent.title = 'CẢNH BÁO: Mất nốt quân này sẽ thua trận ngay lập tức!';
       } else if (count === 0) {
         parent.classList.remove('danger-low');
         parent.classList.add('extinct');
-        parent.title = 'Đã tuyệt diệt hoàn toàn!';
       } else {
         parent.classList.remove('danger-low');
         parent.classList.remove('extinct');
-        parent.title = '';
       }
     }
   }
@@ -547,19 +707,13 @@ class GameUI {
     const redNameEl = document.getElementById('name-player-red');
     const blueNameEl = document.getElementById('name-player-blue');
 
-    if (redNameEl) {
-      redNameEl.textContent = players.red ? players.red.name : 'Đang chờ người chơi...';
-    }
-    if (blueNameEl) {
-      blueNameEl.textContent = players.blue ? players.blue.name : 'Đang chờ người chơi...';
-    }
+    if (redNameEl) redNameEl.textContent = players.red ? players.red.name : 'Đang chờ đối thủ...';
+    if (blueNameEl) blueNameEl.textContent = players.blue ? players.blue.name : 'Đang chờ đối thủ...';
   }
 
   updateSpectatorsUI(count) {
     const countEl = document.getElementById('spectator-count-text');
-    if (countEl) {
-      countEl.textContent = `${count} Khán giả`;
-    }
+    if (countEl) countEl.textContent = `${count} Khán giả`;
   }
 
   addHistoryRecord(record) {
@@ -573,12 +727,9 @@ class GameUI {
     if (record.piece === 'PAPER') pieceIcon = '✋';
     if (record.piece === 'SCISSORS') pieceIcon = '✌️';
 
-    let captureText = '';
-    if (record.captured) {
-      captureText = ` ⚔️ (Ăn ${record.captured})`;
-    }
-
+    let captureText = record.captured ? ` ⚔️ (Ăn ${record.captured})` : '';
     const playerColor = record.player === 'red' ? 'ĐỎ' : 'XANH';
+    
     item.innerHTML = `
       <span><strong>#${record.turnNumber}</strong> [${playerColor}] ${pieceIcon} ${record.from} ➔ ${record.to}${captureText}</span>
       <span style="font-size: 10px; color: var(--text-dim)">${new Date(record.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
@@ -651,9 +802,7 @@ class GameUI {
     if (titleEl) {
       titleEl.innerHTML = `🏆 BÊN ${isRed ? '<span style="color:var(--color-red)">ĐỎ</span>' : '<span style="color:var(--color-blue)">XANH</span>'} CHIẾN THẮNG!`;
     }
-    if (descEl) {
-      descEl.textContent = gameState.winDescription;
-    }
+    if (descEl) descEl.textContent = gameState.winDescription;
 
     modal.classList.add('active');
   }
@@ -661,39 +810,6 @@ class GameUI {
   closeVictoryModal() {
     const modal = document.getElementById('victory-modal');
     if (modal) modal.classList.remove('active');
-  }
-
-  updateShareLinks(roomCode) {
-    fetch('/api/network-ip')
-      .then(res => res.json())
-      .then(data => {
-        const primaryHost = data.primaryUrl || window.location.origin;
-        const playerUrl = `${primaryHost}/playfull.html?room=${roomCode}&role=auto`;
-        const spectatorUrl = `${primaryHost}/playfull.html?room=${roomCode}&role=spectator`;
-
-        const playerInput = document.getElementById('share-player-url');
-        const spectatorInput = document.getElementById('share-spectator-url');
-
-        if (playerInput) playerInput.value = playerUrl;
-        if (spectatorInput) spectatorInput.value = spectatorUrl;
-
-        // Render QR Code image
-        const qrImg = document.getElementById('share-qr-image');
-        if (qrImg) {
-          qrImg.src = `https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(playerUrl)}`;
-        }
-      })
-      .catch(() => {
-        const origin = window.location.origin;
-        const playerUrl = `${origin}/playfull.html?room=${roomCode}&role=auto`;
-        const spectatorUrl = `${origin}/playfull.html?room=${roomCode}&role=spectator`;
-
-        const playerInput = document.getElementById('share-player-url');
-        const spectatorInput = document.getElementById('share-spectator-url');
-
-        if (playerInput) playerInput.value = playerUrl;
-        if (spectatorInput) spectatorInput.value = spectatorUrl;
-      });
   }
 
   showToast(message, type = 'info') {

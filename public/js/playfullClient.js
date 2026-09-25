@@ -1,6 +1,5 @@
 /**
- * PlayFull Multiplayer & Spectator Network Client Library
- * Fulfills Requirement #2: "Dùng thư viện playfull.html để cho phép có server, nhiều người chơi cùng lúc."
+ * PlayFull Multiplayer & Tournament Client SDK
  */
 class PlayFullClient {
   constructor() {
@@ -13,13 +12,20 @@ class PlayFullClient {
     this.players = { red: null, blue: null };
     this.listeners = new Map();
     this.isConnected = false;
+
+    // Tournament state
+    this.isTournament = false;
+    this.tournamentData = null;
+    this.activeTableId = 1;
+    this.myTableId = null;
+    this.myColor = null;
   }
 
   init(serverUrl) {
     if (this.socket) return this;
 
     if (typeof io === 'undefined') {
-      console.error('Socket.io library is not loaded!');
+      console.warn('Socket.io library is not loaded!');
       return this;
     }
 
@@ -35,7 +41,9 @@ class PlayFullClient {
       this.trigger('disconnect');
     });
 
+    // Standard Room Events
     this.socket.on('joined_game_success', (data) => {
+      this.isTournament = false;
       this.roomCode = data.roomCode;
       this.role = data.role;
       this.playerName = data.playerName;
@@ -73,10 +81,59 @@ class PlayFullClient {
       this.trigger('floating_reaction', data);
     });
 
+    // ==========================================
+    // Tournament Events (4 Bàn - 8 Tuyển thủ)
+    // ==========================================
+    this.socket.on('tournament_joined_success', (data) => {
+      this.isTournament = true;
+      this.role = data.role;
+      this.myColor = data.assignedColor;
+      this.myTableId = data.assignedTableId;
+      this.activeTableId = data.assignedTableId || 1;
+      this.playerName = data.playerName;
+      this.tournamentData = data.tournament;
+      this.spectatorCount = data.tournament.spectatorCount;
+      this.trigger('tournament_joined_success', data);
+    });
+
+    this.socket.on('tournament_state_updated', (data) => {
+      if (this.tournamentData) {
+        this.tournamentData.tables = data.tables;
+        this.tournamentData.spectatorCount = data.spectatorCount;
+      }
+      this.spectatorCount = data.spectatorCount;
+      this.trigger('tournament_state_updated', data);
+    });
+
+    this.socket.on('tournament_move_performed', (data) => {
+      if (this.tournamentData) {
+        const table = this.tournamentData.tables.find(t => t.id === data.tableId);
+        if (table) table.gameState = data.gameState;
+      }
+      this.trigger('tournament_move_performed', data);
+    });
+
+    this.socket.on('tournament_table_reset', (data) => {
+      if (this.tournamentData) {
+        const table = this.tournamentData.tables.find(t => t.id === data.tableId);
+        if (table) table.gameState = data.gameState;
+      }
+      this.trigger('tournament_table_reset', data);
+    });
+
+    this.socket.on('tournament_new_chat', (data) => {
+      this.trigger('tournament_new_chat', data);
+    });
+
+    this.socket.on('tournament_floating_reaction', (data) => {
+      this.trigger('tournament_floating_reaction', data);
+    });
+
     return this;
   }
 
-  joinRoom({ roomCode = 'ROOM1', playerName = 'Khách', role = 'auto', layout = 'frontline' }) {
+  // Standard Room
+  joinRoom({ roomCode = '1000', playerName = 'Khách', role = 'auto', layout = 'frontline' }) {
     if (!this.socket) this.init();
     this.socket.emit('join_game', {
       roomCode: roomCode.trim().toUpperCase(),
@@ -87,35 +144,74 @@ class PlayFullClient {
   }
 
   makeMove(from, to) {
-    if (!this.socket || !this.roomCode) return;
-    this.socket.emit('client_move', {
-      roomCode: this.roomCode,
-      from,
-      to
-    });
+    if (!this.socket) return;
+    if (this.isTournament) {
+      this.socket.emit('tournament_client_move', {
+        tableId: this.myTableId || this.activeTableId,
+        from,
+        to
+      });
+    } else {
+      this.socket.emit('client_move', {
+        roomCode: this.roomCode,
+        from,
+        to
+      });
+    }
   }
 
   resetGame(layout = 'frontline') {
-    if (!this.socket || !this.roomCode) return;
-    this.socket.emit('client_reset_game', {
-      roomCode: this.roomCode,
-      layout
-    });
+    if (!this.socket) return;
+    if (this.isTournament) {
+      this.socket.emit('tournament_reset_table', {
+        tableId: this.activeTableId
+      });
+    } else {
+      this.socket.emit('client_reset_game', {
+        roomCode: this.roomCode,
+        layout
+      });
+    }
   }
 
   sendChat(text) {
-    if (!this.socket || !this.roomCode || !text.trim()) return;
-    this.socket.emit('client_send_chat', {
-      roomCode: this.roomCode,
-      text
-    });
+    if (!this.socket || !text.trim()) return;
+    if (this.isTournament) {
+      this.socket.emit('tournament_send_chat', {
+        text,
+        tableId: this.activeTableId
+      });
+    } else {
+      this.socket.emit('client_send_chat', {
+        roomCode: this.roomCode,
+        text
+      });
+    }
   }
 
   sendReaction(emoji) {
-    if (!this.socket || !this.roomCode) return;
-    this.socket.emit('client_send_reaction', {
-      roomCode: this.roomCode,
-      emoji
+    if (!this.socket) return;
+    if (this.isTournament) {
+      this.socket.emit('tournament_send_reaction', {
+        emoji,
+        tableId: this.activeTableId
+      });
+    } else {
+      this.socket.emit('client_send_reaction', {
+        roomCode: this.roomCode,
+        emoji
+      });
+    }
+  }
+
+  // Tournament
+  joinTournament({ playerName = 'Tuyển thủ', role = 'spectator', tableId = 1, color = 'auto' }) {
+    if (!this.socket) this.init();
+    this.socket.emit('join_tournament', {
+      playerName: playerName.trim(),
+      role,
+      tableId,
+      color
     });
   }
 
@@ -139,16 +235,6 @@ class PlayFullClient {
     }
   }
 
-  getShareUrls(hostOverride) {
-    const origin = hostOverride || window.location.origin;
-    const code = this.roomCode || 'ROOM1';
-    return {
-      playerUrl: `${origin}/playfull.html?room=${code}&role=auto`,
-      spectatorUrl: `${origin}/playfull.html?room=${code}&role=spectator`,
-      generalUrl: `${origin}/playfull.html?room=${code}`
-    };
-  }
-
   copyToClipboard(text) {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       return navigator.clipboard.writeText(text);
@@ -163,5 +249,4 @@ class PlayFullClient {
   }
 }
 
-// Global PlayFull client instance
 window.PlayFull = new PlayFullClient();

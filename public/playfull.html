@@ -3,12 +3,56 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>OTTv2 - Đấu Trường Oẳn Tù Tì 9x9 Multiplayer & Spectator</title>
+  <title>OTTv2 - Đấu Trường Oẳn Tù Tì 9x9 Multiplayer</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
   <link rel="stylesheet" href="css/animations.css">
+  <style>
+    .tournament-nav {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      padding: 10px 16px;
+      background: rgba(14, 20, 35, 0.9);
+      border-bottom: 1px solid var(--border-glass);
+      overflow-x: auto;
+    }
+    .tour-tab-btn {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .tour-tab-btn.active-tab {
+      background: linear-gradient(135deg, rgba(0, 210, 255, 0.3) 0%, rgba(0, 180, 219, 0.15) 100%);
+      border-color: var(--color-blue);
+      box-shadow: 0 0 15px rgba(0, 210, 255, 0.3);
+      color: #fff;
+    }
+    .code-badge-container {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 190, 11, 0.15);
+      border: 1px solid rgba(255, 190, 11, 0.4);
+      padding: 4px 12px;
+      border-radius: 20px;
+    }
+    .code-number {
+      font-weight: 800;
+      color: var(--color-gold);
+      letter-spacing: 1px;
+      font-family: monospace;
+      font-size: 15px;
+    }
+  </style>
 </head>
 <body>
   <!-- Header / Navigation Bar -->
@@ -17,8 +61,17 @@
       <span class="brand-icon">⚔️</span>
       <div>
         <span class="brand-title">OTTv2 ARENA</span>
-        <span class="brand-badge">9x9 SERVER</span>
+        <span class="brand-badge">9x9 MULTIPLAYER</span>
       </div>
+    </div>
+
+    <!-- Prominent Room Code & 1-Click Copy -->
+    <div class="code-badge-container" id="box-room-code">
+      <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">MÃ PHÒNG:</span>
+      <span id="header-room-code" class="code-number">...</span>
+      <button id="btn-quick-copy-code" class="btn btn-primary" style="padding: 2px 10px; font-size: 11px; height: 26px; border-radius: 14px; display: none;">
+        📋 Sao chép mã
+      </button>
     </div>
 
     <div class="header-actions">
@@ -33,14 +86,9 @@
         <span id="spectator-count-text">0 Khán giả</span>
       </div>
 
-      <span id="badge-my-role" class="brand-badge" style="background: rgba(255,190,11,0.15); color: var(--color-gold); border-color: rgba(255,190,11,0.3);">
-        Đang kết nối...
+      <span id="badge-my-role" class="brand-badge" style="background: rgba(0, 210, 255, 0.15); color: var(--color-blue); border-color: rgba(0, 210, 255, 0.3);">
+        Đang tải...
       </span>
-
-      <!-- Action Buttons -->
-      <button id="btn-share-room" class="btn btn-primary" title="Chia sẻ link mời chơi hoặc link khán giả">
-        <span>🔗</span> Chia Sẻ Phòng
-      </button>
 
       <button id="btn-rules" class="btn btn-glass" title="Xem luật chơi OTTv2">
         <span>📖</span> Luật Chơi
@@ -55,6 +103,9 @@
       </a>
     </div>
   </header>
+
+  <!-- Tournament Table Selector (Only visible in Tournament Mode) -->
+  <div id="tournament-nav-bar" class="tournament-nav" style="display: none;"></div>
 
   <!-- Main Game Arena -->
   <main class="arena-container">
@@ -118,31 +169,26 @@
       </div>
 
       <div class="board-outer">
-        <!-- Top Coordinate Labels (a - i) -->
         <div class="coords-row-top">
           <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
         </div>
 
-        <!-- Left Numbers (9 down to 1) -->
         <div class="coords-col-left">
           <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
         </div>
 
-        <!-- 9x9 Grid (81 Squares) -->
         <div id="board-grid" class="board-grid-9x9"></div>
 
-        <!-- Right Numbers (9 down to 1) -->
         <div class="coords-col-right">
           <span>9</span><span>8</span><span>7</span><span>6</span><span>5</span><span>4</span><span>3</span><span>2</span><span>1</span>
         </div>
 
-        <!-- Bottom Coordinate Labels (a - i) -->
         <div class="coords-row-bottom">
           <span>a</span><span>b</span><span>c</span><span>d</span><span>e</span><span>f</span><span>g</span><span>h</span><span>i</span>
         </div>
       </div>
 
-      <!-- Floating Reactions Trigger Bar (for 100+ Spectators & Players) -->
+      <!-- Floating Reactions Trigger Bar -->
       <div class="reactions-bar glass-panel" style="width: 100%; max-width: 580px;">
         <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">Thả cảm xúc:</span>
         <button class="reaction-btn" data-emoji="👏" title="Vỗ tay">👏</button>
@@ -159,7 +205,6 @@
 
     <!-- RIGHT SIDEBAR: Blue Player HUD, Match History & Live Chat -->
     <aside class="right-sidebar">
-      <!-- Blue Player HUD (Player 2) -->
       <div class="player-card blue-theme glass-panel" id="card-player-blue">
         <div class="player-header">
           <div class="player-avatar blue-avatar">🔵</div>
@@ -171,7 +216,6 @@
           </div>
         </div>
 
-        <!-- Inventory Table -->
         <div class="inventory-section">
           <div class="inventory-title">
             <span>Lực Lượng Quân Xanh</span>
@@ -196,7 +240,6 @@
           </div>
         </div>
 
-        <!-- Goal Sanctuary Badge -->
         <div class="goal-reminder">
           <span>🏆 Mục tiêu chiến thắng: Tiến vào ô</span>
           <span class="goal-target-square">a1</span>
@@ -229,48 +272,6 @@
   <!-- Floating Reactions Animation Layer -->
   <div id="floating-reactions-layer"></div>
 
-  <!-- MODAL: Share Room & QR Code -->
-  <div id="share-modal" class="modal-overlay">
-    <div class="modal-content glass-panel-glow">
-      <div class="modal-header">
-        <h3 class="modal-title">🔗 Chia Sẻ Phòng Đấu OTTv2</h3>
-        <button class="btn btn-glass btn-icon btn-close-modal">✕</button>
-      </div>
-
-      <p style="font-size: 13px; color: var(--text-muted); line-height: 1.5;">
-        Gửi liên kết dưới đây cho <strong>thầy giáo</strong> hoặc bạn bè để cùng vào thi đấu trực tiếp, hoặc cho khán giả vào xem trận đấu!
-      </p>
-
-      <!-- Player 2 Link -->
-      <div class="share-link-group">
-        <label class="share-link-label">👉 Link dành cho Tuyển thủ (Player 2):</label>
-        <div class="share-link-box">
-          <input type="text" id="share-player-url" class="share-link-input" readonly>
-          <button class="btn btn-primary btn-copy-link" data-target="share-player-url">Sao Chép</button>
-        </div>
-      </div>
-
-      <!-- Spectator Link -->
-      <div class="share-link-group">
-        <label class="share-link-label">👁️ Link dành cho Khán giả xem trực tiếp (Hỗ trợ 100+ người xem):</label>
-        <div class="share-link-box">
-          <input type="text" id="share-spectator-url" class="share-link-input" readonly>
-          <button class="btn btn-glass btn-copy-link" data-target="share-spectator-url">Sao Chép</button>
-        </div>
-      </div>
-
-      <!-- QR Code for Mobile Scanning -->
-      <div class="qr-container">
-        <img id="share-qr-image" src="" alt="QR Code" width="160" height="160" style="border-radius: 8px;">
-        <span style="font-size: 12px; font-weight: 600; color: #111;">Quét mã QR để vào phòng trên điện thoại</span>
-      </div>
-
-      <div style="display: flex; justify-content: flex-end;">
-        <button class="btn btn-glass btn-close-modal">Đóng</button>
-      </div>
-    </div>
-  </div>
-
   <!-- MODAL: Rules Guide -->
   <div id="rules-modal" class="modal-overlay">
     <div class="modal-content glass-panel-glow">
@@ -284,7 +285,7 @@
           <strong>1. Bàn cờ và Cách di chuyển:</strong>
           <p>• Bàn cờ kích thước 9x9 ô vuông (cột a-i, hàng 1-9).</p>
           <p>• Mỗi bên có 9 quân: <strong>3 Đấm (✊), 3 Lá (✋), 3 Kéo (✌️)</strong>.</p>
-          <p>• Mỗi quân cờ được di chuyển <strong>1 ô theo mọi hướng trong 8 hướng</strong> (ngang, dọc, chéo - tương tự như quân Vua trong cờ vua).</p>
+          <p>• Mỗi quân cờ được di chuyển <strong>1 ô theo mọi hướng trong 8 hướng</strong> (ngang, dọc, chéo - như quân Vua cờ vua).</p>
         </div>
 
         <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border-left: 4px solid var(--color-gold);">
@@ -293,15 +294,12 @@
           <p>• ✌️ <strong>Kéo</strong> ăn ✋ <strong>Lá</strong>.</p>
           <p>• ✋ <strong>Lá</strong> ăn ✊ <strong>Đấm</strong>.</p>
           <p>• <strong>Hai quân cùng loại</strong> (Đấm vs Đấm, Lá vs Lá, Kéo vs Kéo): <em>Không thể ăn nhau mà chỉ đứng chặn đường nhau</em>.</p>
-          <p>• Quân yếu thế không thể tấn công quân khắc chế mình.</p>
         </div>
 
         <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px; border-left: 4px solid var(--color-red);">
           <strong>3. Điều kiện Thắng (Có 2 cách thắng):</strong>
-          <p>🏆 <strong>Cách 1 (Tuyệt diệt 1 loại quân):</strong> Ăn sạch hoàn toàn 1 loại quân của đối phương (ví dụ ăn hết 3 quân Đấm, hoặc ăn hết 3 quân Kéo, hoặc ăn hết 3 quân Lá của đối thủ).</p>
-          <p>🏰 <strong>Cách 2 (Chiếm căn cứ đối phương):</strong> Đưa bất kỳ 1 quân cờ nào của mình tiến vào căn cứ chiến lược:</p>
-          <p>&nbsp;&nbsp;• Quân ĐỎ (Player 1) tiến vào ô <strong>i9</strong> ➔ ĐỎ THẮNG!</p>
-          <p>&nbsp;&nbsp;• Quân XANH (Player 2) tiến vào ô <strong>a1</strong> ➔ XANH THẮNG!</p>
+          <p>🏆 <strong>Cách 1:</strong> Ăn sạch hoàn toàn 1 loại quân của đối phương (hết 3 Đấm, hoặc hết 3 Kéo, hoặc hết 3 Lá).</p>
+          <p>🏰 <strong>Cách 2:</strong> Đưa quân tiến vào căn cứ chiến lược đối phương: ĐỎ tiến vào <strong>i9</strong> hoặc XANH tiến vào <strong>a1</strong>!</p>
         </div>
       </div>
 
