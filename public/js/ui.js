@@ -649,6 +649,11 @@ class GameUI {
     }
 
     const counts = gameState.pieceCounts;
+    const totalRed = document.getElementById('total-count-red');
+    if (totalRed) totalRed.textContent = `Còn ${counts.red.total}/9 quân`;
+    const totalBlue = document.getElementById('total-count-blue');
+    if (totalBlue) totalBlue.textContent = `Còn ${counts.blue.total}/9 quân`;
+
     this.updateInventoryCount('red', 'ROCK', counts.red.ROCK);
     this.updateInventoryCount('red', 'PAPER', counts.red.PAPER);
     this.updateInventoryCount('red', 'SCISSORS', counts.red.SCISSORS);

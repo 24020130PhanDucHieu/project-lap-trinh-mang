@@ -14,88 +14,89 @@ function testHttpGet(path) {
 }
 
 async function runTests() {
-  console.log('--- 1. TESTING HTTP ENDPOINTS ---');
+  console.log('--- 1. KIỂM THỬ CÁC ĐƯỜNG DẪN HTTP ---');
   
   const indexRes = await testHttpGet('/');
-  console.log(`[HTTP GET /] Status: ${indexRes.statusCode}, Body length: ${indexRes.data.length}`);
+  console.log(`[HTTP GET /] Trạng thái: ${indexRes.statusCode}, Kích thước: ${indexRes.data.length} bytes`);
   
   const playfullRes = await testHttpGet('/playfull.html');
-  console.log(`[HTTP GET /playfull.html] Status: ${playfullRes.statusCode}, Body length: ${playfullRes.data.length}`);
+  console.log(`[HTTP GET /playfull.html] Trạng thái: ${playfullRes.statusCode}, Kích thước: ${playfullRes.data.length} bytes`);
 
-  const ipRes = await testHttpGet('/api/network-ip');
-  console.log(`[HTTP GET /api/network-ip] Status: ${ipRes.statusCode}, Data: ${ipRes.data}`);
+  const tourRes = await testHttpGet('/api/tournament');
+  console.log(`[HTTP GET /api/tournament] Trạng thái: ${tourRes.statusCode}, Dữ liệu 4 bàn: ${tourRes.data.slice(0, 100)}...`);
 
-  const roomsRes = await testHttpGet('/api/rooms');
-  console.log(`[HTTP GET /api/rooms] Status: ${roomsRes.statusCode}, Data: ${roomsRes.data}`);
-
-  console.log('\n--- 2. TESTING SOCKET.IO MULTIPLAYER & SPECTATOR ENGINE ---');
+  console.log('\n--- 2. KIỂM THỬ KHÁN GIẢ THỜI GIAN THỰC (REAL-TIME SPECTATORS) ---');
   const roomCode = 'TEST_ROOM_' + Math.floor(Math.random() * 100000);
 
-  // Client 1: Player Red
   const clientRed = io('http://localhost:3000');
-  // Client 2: Player Blue
   const clientBlue = io('http://localhost:3000');
-  // Client 3: Spectator
-  const clientSpectator = io('http://localhost:3000');
+  const clientSpectator1 = io('http://localhost:3000');
+  const clientSpectator2 = io('http://localhost:3000');
 
   let redJoined = false;
   let blueJoined = false;
-  let spectatorJoined = false;
+  let spec1Joined = false;
+  let spec2Joined = false;
 
   await new Promise((resolve) => {
     clientRed.on('connect', () => {
-      console.log('Client Red connected to socket server.');
-      clientRed.emit('join_game', { roomCode, playerName: 'Đỏ_Tester', role: 'red' });
+      clientRed.emit('join_game', { roomCode, playerName: 'TuyểnThủ_Đỏ', role: 'red' });
     });
-
     clientRed.on('joined_game_success', (data) => {
-      console.log(`Client Red joined as: ${data.role} in room ${data.roomCode}`);
+      console.log(` Tuyển thủ Đỏ đã vào phòng [${data.roomCode}]`);
       redJoined = true;
-      if (redJoined && blueJoined && spectatorJoined) resolve();
+      if (redJoined && blueJoined && spec1Joined && spec2Joined) resolve();
     });
 
     clientBlue.on('connect', () => {
-      console.log('Client Blue connected to socket server.');
-      clientBlue.emit('join_game', { roomCode, playerName: 'Xanh_Tester', role: 'blue' });
+      clientBlue.emit('join_game', { roomCode, playerName: 'TuyểnThủ_Xanh', role: 'blue' });
     });
-
     clientBlue.on('joined_game_success', (data) => {
-      console.log(`Client Blue joined as: ${data.role} in room ${data.roomCode}`);
+      console.log(` Tuyển thủ Xanh đã vào phòng [${data.roomCode}]`);
       blueJoined = true;
-      if (redJoined && blueJoined && spectatorJoined) resolve();
+      if (redJoined && blueJoined && spec1Joined && spec2Joined) resolve();
     });
 
-    clientSpectator.on('connect', () => {
-      console.log('Client Spectator connected to socket server.');
-      clientSpectator.emit('join_game', { roomCode, playerName: 'ThayGiao_KhanGia', role: 'spectator' });
+    clientSpectator1.on('connect', () => {
+      clientSpectator1.emit('join_game', { roomCode, playerName: 'ThầyGiáo_KhánGiả_1', role: 'spectator' });
+    });
+    clientSpectator1.on('joined_game_success', (data) => {
+      console.log(` Khán giả 1 (Thầy giáo) đã vào xem trực tiếp`);
+      spec1Joined = true;
+      if (redJoined && blueJoined && spec1Joined && spec2Joined) resolve();
     });
 
-    clientSpectator.on('joined_game_success', (data) => {
-      console.log(`Client Spectator joined as: ${data.role} (Spectator count: ${data.spectatorCount})`);
-      spectatorJoined = true;
-      if (redJoined && blueJoined && spectatorJoined) resolve();
+    clientSpectator2.on('connect', () => {
+      clientSpectator2.emit('join_game', { roomCode, playerName: 'SinhViên_KhánGiả_2', role: 'spectator' });
+    });
+    clientSpectator2.on('joined_game_success', (data) => {
+      console.log(` Khán giả 2 đã vào xem trực tiếp (Tổng số khán giả phòng: ${data.spectatorCount})`);
+      spec2Joined = true;
+      if (redJoined && blueJoined && spec1Joined && spec2Joined) resolve();
     });
   });
 
-  console.log('\n--- 3. TESTING MOVE SYNCHRONIZATION TO PLAYERS AND SPECTATORS ---');
-  // Move Red piece at col 0, row 1 (a2) to col 0, row 2 (a3)
+  console.log('\n--- 3. KIỂM THỬ ĐỒNG BỘ NƯỚC ĐI TỨC THÌ ĐẾN KHÁN GIẢ ---');
   await new Promise((resolve) => {
-    let spectatorReceivedMove = false;
-    let blueReceivedMove = false;
+    let spec1GotMove = false;
+    let spec2GotMove = false;
+    const startTime = Date.now();
 
-    clientSpectator.on('move_performed', (data) => {
-      console.log(`[SPECTATOR RECEIVED MOVE] Move #${data.moveRecord.turnNumber}: ${data.moveRecord.piece} ${data.moveRecord.from} -> ${data.moveRecord.to}, next turn: ${data.gameState.turn}`);
-      spectatorReceivedMove = true;
-      if (spectatorReceivedMove && blueReceivedMove) resolve();
+    clientSpectator1.on('move_performed', (data) => {
+      const latency = Date.now() - startTime;
+      console.log(` [KHÁN GIẢ 1 NHẬN NƯỚC ĐI THỜI GIAN THỰC] (${latency}ms) Nước #${data.moveRecord.turnNumber}: ${data.moveRecord.piece} ${data.moveRecord.from} -> ${data.moveRecord.to}`);
+      spec1GotMove = true;
+      if (spec1GotMove && spec2GotMove) resolve();
     });
 
-    clientBlue.on('move_performed', (data) => {
-      console.log(`[BLUE RECEIVED MOVE] Move #${data.moveRecord.turnNumber}`);
-      blueReceivedMove = true;
-      if (spectatorReceivedMove && blueReceivedMove) resolve();
+    clientSpectator2.on('move_performed', (data) => {
+      const latency = Date.now() - startTime;
+      console.log(` [KHÁN GIẢ 2 NHẬN NƯỚC ĐI THỜI GIAN THỰC] (${latency}ms) Nước #${data.moveRecord.turnNumber}`);
+      spec2GotMove = true;
+      if (spec1GotMove && spec2GotMove) resolve();
     });
 
-    console.log('Emitting client_move from Red: a2 (0, 1) -> a3 (0, 2)...');
+    console.log(' Tuyển thủ Đỏ thực hiện nước đi: a2 -> a3...');
     clientRed.emit('client_move', {
       roomCode,
       from: { col: 0, row: 1 },
@@ -103,34 +104,49 @@ async function runTests() {
     });
   });
 
-  console.log('\n--- 4. TESTING REACTION BROADCAST ---');
+  console.log('\n--- 4. KIỂM THỬ THẢ CẢM XÚC NỔI CỦA KHÁN GIẢ ---');
   await new Promise((resolve) => {
     clientRed.on('floating_reaction', (data) => {
-      console.log(`[REACTION RECEIVED] ${data.sender} sent ${data.emoji}`);
+      console.log(` [TUYỂN THỦ NHẬN CẢM XÚC] Khán giả "${data.sender}" đã thả emoji: ${data.emoji}`);
       resolve();
     });
-    clientSpectator.emit('client_send_reaction', { roomCode, emoji: '🔥' });
+    clientSpectator1.emit('client_send_reaction', { roomCode, emoji: '🔥' });
   });
 
-  console.log('\n--- 5. TESTING CHAT BROADCAST ---');
+  console.log('\n--- 5. KIỂM THỬ BÌNH LUẬN TRỰC TIẾP (LIVE CHAT) CỦA KHÁN GIẢ ---');
   await new Promise((resolve) => {
-    clientRed.on('new_chat_message', (data) => {
-      if (data.sender === 'ThayGiao_KhanGia') {
-        console.log(`[CHAT RECEIVED] ${data.sender}: ${data.text}`);
+    clientBlue.on('new_chat_message', (data) => {
+      if (data.sender === 'ThầyGiáo_KhánGiả_1') {
+        console.log(` [TẤT CẢ MỌI NGƯỜI NHẬN TIN NHẮN] ${data.sender}: "${data.text}"`);
         resolve();
       }
     });
-    clientSpectator.emit('client_send_chat', { roomCode, text: 'Trận đấu rất hay!' });
+    clientSpectator1.emit('client_send_chat', { roomCode, text: 'Nước đi hay lắm!' });
   });
 
-  console.log('\n✅ ALL INTEGRATION TESTS PASSED 100%!');
+  console.log('\n--- 6. KIỂM THỬ KHÁN GIẢ THEO DÕI GIẢI ĐẤU 4 BÀN ---');
+  const clientTourSpectator = io('http://localhost:3000');
+  await new Promise((resolve) => {
+    clientTourSpectator.on('connect', () => {
+      clientTourSpectator.emit('join_tournament', { playerName: 'KhánGiả_XemGiải', role: 'spectator' });
+    });
+    clientTourSpectator.on('tournament_joined_success', (data) => {
+      console.log(` Khán giả giải đấu đã nhận dữ liệu cả 4 bàn thi đấu (Số lượng bàn: ${data.tournament.tables.length})`);
+      resolve();
+    });
+  });
+
+  console.log('\n✅ TẤT CẢ CÁC BÀI KIỂM THỬ KHÁN GIẢ THỜI GIAN THỰC ĐÃ VƯỢT QUA 100%!');
+
   clientRed.disconnect();
   clientBlue.disconnect();
-  clientSpectator.disconnect();
+  clientSpectator1.disconnect();
+  clientSpectator2.disconnect();
+  clientTourSpectator.disconnect();
   process.exit(0);
 }
 
 runTests().catch(err => {
-  console.error('Test failed with error:', err);
+  console.error('Test thất bại với lỗi:', err);
   process.exit(1);
 });

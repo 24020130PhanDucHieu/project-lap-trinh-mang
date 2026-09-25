@@ -26,17 +26,16 @@ class AIBot {
         return move;
       }
 
-      // 2. Extinction Win Check (+4000)
+      // 2. Total Elimination Win Check (+4000)
       if (move.isCapture && move.targetPiece) {
-        const oppPieceType = move.targetPiece.type;
-        const currentOppCount = gameState.pieceCounts[this.opponentColor][oppPieceType];
-        if (currentOppCount === 1) {
-          // Capturing this last piece of this type triggers immediate extinction victory!
+        const oppTotal = gameState.pieceCounts[this.opponentColor].total;
+        if (oppTotal === 1) {
+          // Capturing this last piece on the board wins the entire game!
           return move;
         }
 
-        // Regular capture: value based on how few opponent has (+300 to +800)
-        score += 350 + (3 - currentOppCount) * 150;
+        // Regular capture bonus
+        score += 350 + (9 - oppTotal) * 40;
       }
 
       // 3. Distance to Goal Sanctuary: Closer is better (+10 to +80)

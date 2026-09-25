@@ -231,21 +231,13 @@ function makeMove(gameState, from, to) {
     winDescription = 'Quân XANH đã đột kích thành công vào căn cứ a1 của đối phương! CHIẾN THẮNG!';
   }
 
-  // 2. Extinction Check
+  // 2. Total Elimination Check (Ăn sạch toàn bộ quân trên bàn cờ của đối thủ):
   if (!winner) {
     const oppCounts = pieceCounts[opponent];
-    if (oppCounts[PIECE_TYPES.ROCK] === 0) {
+    if (oppCounts.total === 0) {
       winner = turn;
-      winReason = 'EXTINCTION';
-      winDescription = `Bên ${turn === PLAYERS.RED ? 'ĐỎ' : 'XANH'} đã tiêu diệt toàn bộ quân ĐẤM ✊ của đối phương! CHIẾN THẮNG!`;
-    } else if (oppCounts[PIECE_TYPES.PAPER] === 0) {
-      winner = turn;
-      winReason = 'EXTINCTION';
-      winDescription = `Bên ${turn === PLAYERS.RED ? 'ĐỎ' : 'XANH'} đã tiêu diệt toàn bộ quân LÁ ✋ của đối phương! CHIẾN THẮNG!`;
-    } else if (oppCounts[PIECE_TYPES.SCISSORS] === 0) {
-      winner = turn;
-      winReason = 'EXTINCTION';
-      winDescription = `Bên ${turn === PLAYERS.RED ? 'ĐỎ' : 'XANH'} đã tiêu diệt toàn bộ quân KÉO ✌️ của đối phương! CHIẾN THẮNG!`;
+      winReason = 'TOTAL_ELIMINATION';
+      winDescription = `Bên ${turn === PLAYERS.RED ? 'ĐỎ' : 'XANH'} đã ăn sạch toàn bộ quân trên bàn cờ của đối thủ! CHIẾN THẮNG TUYỆT ĐỐI!`;
     }
   }
 
